@@ -1,0 +1,345 @@
+# -*- coding: utf-8 -*-
+"""Wyatt Portfolio Daily Brief renderer, v7 division template.
+
+Data-driven: reads a JSON payload and renders the combined printable PDF.
+The agent (nightly shift or interactive session) pulls live numbers per the
+wyatt-daily-brief SOP, writes the JSON, then runs:
+
+    python3 render_brief.py brief-data.json out.pdf
+
+The script never fetches data and holds no credentials. Layout is the locked
+v7 template extracted from build_coworking_v1.py and the approved KCM v7 /
+Ascend v5-final PDFs (2026-08-08). Do not restyle without Derrick's directive.
+
+JSON shape (all colors are token strings: ink muted light green amber black):
+
+{
+  "as_of_line": "As of Sunday, August 10, 2026  ·  Yest 8/10  ·  ...",
+  "as_of_short": "Aug 10, 2026",
+  "brief_foot": "footer line used on the cover page",
+  "cover": {
+    "title": "Wyatt Portfolio Daily Brief",
+    "health": "portfolio-level italic paragraph",
+    "included": [["Division title", "one-line status"], ...],
+    "coming": ["Division names not yet in the brief", ...],
+    "note": "optional small-print line"
+  },
+  "divisions": [
+    {
+      "title": "Kaizen Construction Management",
+      "foot": "sources footer line for this division's pages",
+      "health": "italic health paragraph",
+      "blocks": [
+        {"kind": "section", "title": "PORTFOLIO SNAPSHOT", "sub": "optional"},
+        {"kind": "cards", "items": [[label, value, sub, color] x4, ...]},
+        {"kind": "table", "cols": [...], "widths": [...], "rows": [[cell,...]],
+         "note": "optional", "left_cols": 2},
+        {"kind": "flags", "items": [[title, body], ...]},
+        {"kind": "prose", "text": "...", "size": 8.5}
+      ]
+    }
+  ]
+}
+
+A table cell is either a string or [text, color, bold].
+"""
+import json
+import sys
+
+from reportlab.pdfgen import canvas
+from reportlab.lib.colors import Color, HexColor
+from reportlab.lib.utils import simpleSplit
+
+W, H = 612, 792
+L, R = 54, 558
+TOP = H - 54
+BOTTOM = 78  # content floor; footer sits below
+
+COLORS = {
+    "ink":   Color(0.102, 0.102, 0.18),
+    "muted": Color(0.42, 0.447, 0.502),
+    "light": Color(0.612, 0.639, 0.686),
+    "green": Color(0.082, 0.502, 0.239),
+    "amber": HexColor("#B45309"),
+    "black": Color(0, 0, 0),
+}
+STRIPE = Color(0.953, 0.957, 0.965)
+RULE = Color(0.878, 0.894, 0.918)
+
+INK, MUTED, LIGHT = COLORS["ink"], COLORS["muted"], COLORS["light"]
+
+
+def color(tok, default=INK):
+    return COLORS.get(tok, default)
+
+
+class Doc:
+    def __init__(self, path, data):
+        self.c = canvas.Canvas(path, pagesize=(W, H))
+        self.data = data
+        self.y = TOP
+        self.page = 1
+        self.foot = data.get("brief_foot", "")
+        self.foot_label = "Wyatt Portfolio Daily Brief"
+
+    # ---------- page plumbing ----------
+    def footer(self):
+        c = self.c
+        c.setFont("Helvetica", 6.8)
+        c.setFillColor(LIGHT)
+        for i, ln in enumerate(simpleSplit(self.foot, "Helvetica", 6.8, R - L)):
+            c.drawString(L, 52 - i * 8, ln)
+        c.setFont("Helvetica", 6.8)
+        c.setFillColor(LIGHT)
+        c.drawString(L, 32, "%s  ·  As of %s" % (self.foot_label, self.data.get("as_of_short", "")))
+        c.drawRightString(R, 32, "Page %d" % self.page)
+
+    def new_page(self):
+        self.footer()
+        self.c.showPage()
+        self.page += 1
+        self.y = TOP
+
+    def need(self, h):
+        if self.y - h < BOTTOM:
+            self.new_page()
+
+    # ---------- v7 primitives ----------
+    def title_block(self, title):
+        c = self.c
+        c.setFont("Helvetica", 7)
+        c.setFillColor(LIGHT)
+        c.drawString(L, H - 54, "KAIZEN PORTFOLIO  ·  DAILY BRIEF")
+        c.setFont("Helvetica-Bold", 22)
+        c.setFillColor(INK)
+        c.drawString(L, H - 80, title)
+        c.setFont("Helvetica", 7.5)
+        c.setFillColor(MUTED)
+        c.drawString(L, H - 95, self.data.get("as_of_line", ""))
+        self.y = H - 118
+
+    def health(self, text):
+        c = self.c
+        lines = simpleSplit(text, "Helvetica-Oblique", 9.5, R - L)
+        self.need(len(lines) * 12.5)
+        c.setFont("Helvetica-Oblique", 9.5)
+        c.setFillColor(INK)
+        for ln in lines:
+            c.drawString(L, self.y, ln)
+            self.y -= 12.5
+
+    def section(self, title, sub=None, keep=90):
+        # keep the header attached to at least ~2 rows of content; a block may ask for more
+        # ("keep": points) so a short detail table is never orphaned across a page break.
+        self.need(keep)
+        c = self.c
+        self.y -= 20
+        c.setFont("Helvetica-Bold", 10.5)
+        c.setFillColor(INK)
+        c.drawString(L, self.y, title)
+        self.y -= 3
+        c.setStrokeColor(RULE)
+        c.setLineWidth(0.8)
+        c.line(L, self.y, R, self.y)
+        if sub:
+            self.y -= 10
+            c.setFont("Helvetica", 6.8)
+            c.setFillColor(LIGHT)
+            c.drawString(L, self.y, sub)
+        self.y -= 12
+
+    def cards(self, items):
+        c = self.c
+        for start in range(0, len(items), 4):
+            row = items[start:start + 4]
+            self.need(48)
+            cw = (R - L) / 4.0
+            for i, item in enumerate(row):
+                label, val, sub = item[0], item[1], item[2]
+                col = color(item[3] if len(item) > 3 else "ink")
+                x = L + i * cw
+                c.setFont("Helvetica", 7.5)
+                c.setFillColor(LIGHT)
+                c.drawString(x, self.y, label.upper())
+                c.setFont("Helvetica-Bold", 15)
+                c.setFillColor(col)
+                c.drawString(x, self.y - 18, val)
+                c.setFont("Helvetica", 6.8)
+                c.setFillColor(MUTED)
+                c.drawString(x, self.y - 30, sub)
+            self.y -= 44
+
+    def _table_header(self, cols, xs, widths, left_cols):
+        c = self.c
+        c.setFont("Helvetica-Bold", 8)
+        c.setFillColor(MUTED)
+        for i, h in enumerate(cols):
+            if i < left_cols:
+                c.drawString(xs[i], self.y, h)
+            else:
+                c.drawRightString(xs[i] + widths[i] - 4, self.y, h)
+        self.y -= 4
+        c.setStrokeColor(RULE)
+        c.setLineWidth(0.6)
+        c.line(L, self.y, R, self.y)
+        self.y -= 14
+
+    def table(self, cols, widths, rows, note=None, left_cols=2):
+        c = self.c
+        xs, acc = [], L
+        for w in widths:
+            xs.append(acc)
+            acc += w
+        self.need(40)
+        self._table_header(cols, xs, widths, left_cols)
+        stripe = False
+        for row in rows:
+            if self.y - 18 < BOTTOM:
+                self.new_page()
+                self._table_header(cols, xs, widths, left_cols)
+            if stripe:
+                c.setFillColor(STRIPE)
+                c.rect(L, self.y - 5, R - L, 18, stroke=0, fill=1)
+            stripe = not stripe
+            for i, cell in enumerate(row):
+                if isinstance(cell, (list, tuple)):
+                    txt = cell[0]
+                    col = color(cell[1] if len(cell) > 1 else "ink")
+                    bold = bool(cell[2]) if len(cell) > 2 else False
+                else:
+                    txt, col, bold = cell, (INK if i < left_cols else COLORS["black"]), False
+                c.setFont("Helvetica-Bold" if bold else "Helvetica", 8.5)
+                c.setFillColor(col)
+                if i < left_cols:
+                    c.drawString(xs[i], self.y, txt)
+                else:
+                    c.drawRightString(xs[i] + widths[i] - 4, self.y, txt)
+            self.y -= 18
+        if note:
+            self.y -= 2
+            lines = simpleSplit(note, "Helvetica", 6.8, R - L)
+            self.need(len(lines) * 8)
+            c.setFont("Helvetica", 6.8)
+            c.setFillColor(MUTED)
+            for ln in lines:
+                c.drawString(L, self.y, ln)
+                self.y -= 8
+
+    def flags(self, items):
+        c = self.c
+        for title, body in items:
+            body_lines = simpleSplit(body, "Helvetica", 8, R - L - 10)
+            self.need(11 + len(body_lines) * 10 + 8)
+            c.setFillColor(INK)
+            c.circle(L + 2.5, self.y + 3, 1.6, stroke=0, fill=1)
+            c.setFont("Helvetica-Bold", 8.5)
+            c.setFillColor(INK)
+            c.drawString(L + 10, self.y, title)
+            self.y -= 11
+            c.setFont("Helvetica", 8)
+            c.setFillColor(MUTED)
+            for ln in body_lines:
+                c.drawString(L + 10, self.y, ln)
+                self.y -= 10
+            self.y -= 8
+
+    def prose(self, text, size=8.5, bold=False):
+        c = self.c
+        self.y -= 6
+        font = "Helvetica-Bold" if bold else "Helvetica"
+        lines = simpleSplit(text, font, size, R - L)
+        self.need(len(lines) * (size + 3))
+        c.setFont(font, size)
+        c.setFillColor(COLORS["black"])
+        for ln in lines:
+            c.drawString(L, self.y, ln)
+            self.y -= size + 3
+
+    # ---------- assembly ----------
+    def cover(self):
+        cov = self.data.get("cover")
+        if not cov:
+            return
+        c = self.c
+        self.foot_label = "Wyatt Portfolio Daily Brief"
+        self.title_block(cov.get("title", "Wyatt Portfolio Daily Brief"))
+        if cov.get("health"):
+            self.health(cov["health"])
+        included = cov.get("included") or []
+        if included:
+            self.section("IN THIS BRIEF", "One card per division, in the locked portfolio order  ·  print-ready")
+            for name, line in included:
+                self.need(24)
+                c.setFont("Helvetica-Bold", 9.5)
+                c.setFillColor(INK)
+                c.drawString(L, self.y, name)
+                self.y -= 11
+                c.setFont("Helvetica", 8)
+                c.setFillColor(MUTED)
+                for ln in simpleSplit(line, "Helvetica", 8, R - L - 10):
+                    c.drawString(L + 10, self.y, ln)
+                    self.y -= 10
+                self.y -= 6
+        coming = cov.get("coming") or []
+        if coming:
+            self.section("COMING ONLINE", "Divisions joining the brief as their cards are verified")
+            c.setFont("Helvetica", 8.5)
+            c.setFillColor(MUTED)
+            for ln in simpleSplit("  ·  ".join(coming), "Helvetica", 8.5, R - L):
+                self.need(12)
+                c.drawString(L, self.y, ln)
+                self.y -= 11.5
+        if cov.get("note"):
+            self.y -= 8
+            c.setFont("Helvetica", 6.8)
+            c.setFillColor(LIGHT)
+            for ln in simpleSplit(cov["note"], "Helvetica", 6.8, R - L):
+                self.need(9)
+                c.drawString(L, self.y, ln)
+                self.y -= 8
+        self.new_page()
+
+    def division(self, d):
+        self.foot = d.get("foot", self.data.get("brief_foot", ""))
+        self.foot_label = d.get("title", "")
+        self.title_block(d.get("title", ""))
+        if d.get("health"):
+            self.health(d["health"])
+        for b in d.get("blocks", []):
+            kind = b.get("kind")
+            if kind == "section":
+                self.section(b.get("title", ""), b.get("sub"), float(b.get("keep", 90)))
+            elif kind == "cards":
+                self.cards(b.get("items", []))
+            elif kind == "table":
+                self.table(b.get("cols", []), b.get("widths", []), b.get("rows", []),
+                           b.get("note"), int(b.get("left_cols", 2)))
+            elif kind == "flags":
+                self.flags(b.get("items", []))
+            elif kind == "prose":
+                self.prose(b.get("text", ""), float(b.get("size", 8.5)), bool(b.get("bold", False)))
+            else:
+                raise ValueError("unknown block kind: %r" % kind)
+
+    def build(self):
+        self.cover()
+        divisions = self.data.get("divisions", [])
+        for i, d in enumerate(divisions):
+            self.division(d)
+            if i < len(divisions) - 1:
+                self.new_page()
+        self.footer()
+        self.c.save()
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit("usage: python3 render_brief.py <data.json> <out.pdf>")
+    with open(sys.argv[1], "r") as f:
+        data = json.load(f)
+    Doc(sys.argv[2], data).build()
+    print("built %s" % sys.argv[2])
+
+
+if __name__ == "__main__":
+    main()

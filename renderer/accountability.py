@@ -45,19 +45,17 @@ def same_person(a, b):
     return first(a).lower() == first(b).lower()
 
 
-def label(owners, fb="-", max_names=2):
-    """Owner cell text: one or two first names; more than that reads 'Team (N)' and the reporting
-    line under the table names every one of them."""
+def label(owners, fb="-", max_names=None):
+    """Owner cell text: every owner's first name, comma-separated. The table renderer wraps the
+    Owner column, so a row owned by five people shows five names, never 'Team'."""
     if not owners:
         return fb
-    if len(owners) <= max_names:
-        return "/".join(first(o) for o in owners)
-    return "Team (%d)" % len(owners)
+    return ", ".join(sorted((first(o) for o in owners), key=str.lower))
 
 
 def names(owners, fb="-"):
     """Full first-name list for section sub-lines and flags: 'Danielle, Laurie, Tommy, Gabby, Diana'."""
-    return ", ".join(first(o) for o in owners) if owners else fb
+    return ", ".join(sorted((first(o) for o in owners), key=str.lower)) if owners else fb
 
 
 def biz_days_back(as_of, n=5):
@@ -91,6 +89,8 @@ def reporting(submits, expected, as_of, n=5):
         tally.append(dict(name=e, filed=filed, n=n, last=last, on_form=k is not None))
         if not weekend and as_of.isoformat() not in ds:
             missed.append(e)
+    missed.sort(key=lambda x: first(x).lower())
+    tally.sort(key=lambda t: first(t["name"]).lower())
     extra = [k for k in submits if k != "(unnamed)" and not any(same_person(k, e) for e in expected)]
     return dict(expected=list(expected), tally=tally, missed_yest=missed, weekend=weekend, extra=extra,
                 window="%s-%s" % (_md(days[-1].isoformat()), _md(days[0].isoformat())))

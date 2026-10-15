@@ -193,14 +193,10 @@ class Doc:
         self.need(40)
         self._table_header(cols, xs, widths, left_cols)
         stripe = False
+        LINE = 10  # extra height per wrapped line (left-aligned text cells wrap; numbers never do)
         for row in rows:
-            if self.y - 18 < BOTTOM:
-                self.new_page()
-                self._table_header(cols, xs, widths, left_cols)
-            if stripe:
-                c.setFillColor(STRIPE)
-                c.rect(L, self.y - 5, R - L, 18, stroke=0, fill=1)
-            stripe = not stripe
+            # unpack cells once so the row height can account for wrapped text in the left columns
+            cells = []
             for i, cell in enumerate(row):
                 if isinstance(cell, (list, tuple)):
                     txt = cell[0]
@@ -208,13 +204,30 @@ class Doc:
                     bold = bool(cell[2]) if len(cell) > 2 else False
                 else:
                     txt, col, bold = cell, (INK if i < left_cols else COLORS["black"]), False
-                c.setFont("Helvetica-Bold" if bold else "Helvetica", 8.5)
+                font = "Helvetica-Bold" if bold else "Helvetica"
+                if i < left_cols and txt:
+                    lines = simpleSplit(str(txt), font, 8.5, widths[i] - 2) or [str(txt)]
+                else:
+                    lines = [str(txt)]
+                cells.append((lines, col, font, i))
+            nlines = max(len(cl[0]) for cl in cells) if cells else 1
+            rh = 18 + (nlines - 1) * LINE
+            if self.y - rh < BOTTOM:
+                self.new_page()
+                self._table_header(cols, xs, widths, left_cols)
+            if stripe:
+                c.setFillColor(STRIPE)
+                c.rect(L, self.y - 5 - (rh - 18), R - L, rh, stroke=0, fill=1)
+            stripe = not stripe
+            for lines, col, font, i in cells:
+                c.setFont(font, 8.5)
                 c.setFillColor(col)
                 if i < left_cols:
-                    c.drawString(xs[i], self.y, txt)
+                    for k, ln in enumerate(lines):
+                        c.drawString(xs[i], self.y - k * LINE, ln)
                 else:
-                    c.drawRightString(xs[i] + widths[i] - 4, self.y, txt)
-            self.y -= 18
+                    c.drawRightString(xs[i] + widths[i] - 4, self.y, lines[0])
+            self.y -= rh
         if note:
             self.y -= 2
             lines = simpleSplit(note, "Helvetica", 6.8, R - L)

@@ -250,7 +250,7 @@ def _kcm(M, ao):
             ["Homes in Motion", str(len(lst) + len(uc) + len(cm)), "listed + UC + coming", ""]]},
         {"kind": "section", "title": "MONTHLY EVENTS", "sub": "derived live from Specs · Status = on/off the goal's pace this month"},
         {"kind": "table", "cols": ["Event", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
-         "widths": [150, 66, 52, 40, 40, 40, 50, 66], "left_cols": 2, "rows": [
+         "widths": [122, 104, 46, 38, 38, 38, 50, 68], "left_cols": 2, "rows": [
             evrow("New Starts", _own(M, "kcm", "New Starts", "Amber"), 5, "New Starts"),
             evrow("Specs Sold", _own(M, "kcm", "Specs Sold", "Danielle"), 2, "Specs Sold"),
             evrow("Construction Loans Approved", _own(M, "kcm", "Construction Loans Approved", "Randall"), 6, "Loans Approved"),
@@ -261,7 +261,7 @@ def _kcm(M, ao):
         {"kind": "section", "title": "TEAM ACTIVITY - DAILY FORMS",
          "sub": "reporters: %s · Status = on or off the goal's pace for this point in the month" % ACC.names(reporters)},
         {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
-         "widths": [150, 66, 52, 40, 40, 40, 50, 66], "left_cols": 2, "rows": [
+         "widths": [122, 104, 46, 38, 38, 38, 50, 68], "left_cols": 2, "rows": [
             frow("Conversations", 13, "day", f["conv"]),
             frow("New Leads", 3, "day", f["lead"]),
             frow("Showings (buyer + listing)", 2, "day", f["show"]),
@@ -558,7 +558,7 @@ def _coworking(M, ao):
             ["Ad Leads MTD", str(a["MTD"]["leads"]), money(a["MTD"]["spend"]) + " spend", "green"]]},
         {"kind": "section", "title": "PIPELINE ACTIVITY", "sub": "owners %s · Status = on/off the goal's pace" % ACC.names(_expected(M, "cowork", ["New Leads", "Conversations", "Free Tours Booked", "Events Booked"], ["Lindsey Moore"]))},
         {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
-         "widths": [148, 64, 56, 42, 42, 44, 52, 56], "left_cols": 2, "rows": [
+         "widths": [124, 96, 48, 40, 40, 42, 52, 62], "left_cols": 2, "rows": [
             prow("New Leads", 3, "day", p["new_leads"]),
             prow("Conversations", 5, "day", p["conv"]),
             prow("Free Tours Booked", 1, "day", p["tours"]),
@@ -642,7 +642,7 @@ def _rentals(M, ao):
         blocks += [
             {"kind": "section", "title": "LEASING FUNNEL", "sub": "leads, calls and appointments straight from Follow Up Boss · Status = on/off the goal's pace"},
             {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
-             "widths": [148, 66, 50, 44, 44, 44, 52, 56], "left_cols": 2, "rows": [
+             "widths": [120, 100, 46, 42, 42, 42, 52, 60], "left_cols": 2, "rows": [
                 arow("Leads", 5, "day", "Arkie/Tommy", rf["Leads"]),
                 arow("Conversations", 3, "day", "Arkie/Tommy", rf["Conversations"]),
                 arow("Appointments Set", 1, "day", "Arkie/Tommy", rf["Appointments Set"])],
@@ -654,7 +654,7 @@ def _rentals(M, ao):
                      + [[A("Total", "ink", True), A(str(sum(M.get("rentals_set_by_prop", {}).values())), "ink", True)]]},
             {"kind": "section", "title": "PROPERTY MANAGEMENT ACTIVITY", "sub": "reporters: %s · daily form until the Buildium lease-event feed lands · Status = on/off the goal's pace" % ACC.names(pm_reporters)},
             {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
-             "widths": [148, 66, 50, 44, 44, 44, 52, 56], "left_cols": 2, "rows": [
+             "widths": [120, 100, 46, 42, 42, 42, 52, 60], "left_cols": 2, "rows": [
                 arow("Showings", 2, "day", "Lara", act["Showings"]),
                 arow("Applications", 1, "day", "Lara", act["Applications"]),
                 arow("New Leases", 1, "day", "Lara", act["New Leases"]),
@@ -668,7 +668,7 @@ def _rentals(M, ao):
         blocks += [
         {"kind": "section", "title": "LEASING ACTIVITY", "sub": "reporters: %s · hand-logged daily forms · Status = on/off the goal's pace" % ACC.names(reporters)},
         {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
-         "widths": [148, 66, 50, 44, 44, 44, 52, 56], "left_cols": 2, "rows": [
+         "widths": [120, 100, 46, 42, 42, 42, 52, 60], "left_cols": 2, "rows": [
             arow("Leads", 5, "day", "Arkie/Tommy", act["Leads"]),
             arow("Conversations", 3, "day", "Arkie/Tommy", act["Conversations"]),
             arow("Appointments Set", 1, "day", "Arkie/Tommy", act["Appointments Set"]),
@@ -844,7 +844,7 @@ def _fundamentals(M, ao):
             ["Withdrawals MTD", str(p["churn"]["MTD"]), "%d last month" % p["churn"]["LastMo"], ""]]},
         {"kind": "section", "title": "ENROLLMENT & STAFF ACTIVITY", "sub": "owner Paige Comeaux · derived from start / end / hire dates in the base · Status = on/off the goal's pace"},
         {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
-         "widths": [148, 64, 56, 42, 42, 44, 52, 56], "left_cols": 2, "rows": [
+         "widths": [124, 96, 48, 40, 40, 42, 52, 62], "left_cols": 2, "rows": [
             prow("New Enrollments", 2, "day", p["new_enroll"]),
             prow("Churn (withdrawals)", 0, "day", p["churn"], direction="down"),
             prow("New Hires", 1, "day", p["new_hires"]),
@@ -854,7 +854,7 @@ def _fundamentals(M, ao):
                   "Churn is counted on each child's last day. Goals render as stored in the registry (daily cadence, set before the base existed); Randall is confirming the periods.")},
         {"kind": "section", "title": "PROSPECT FUNNEL", "sub": "leads, conversations and tours from Paige's M-F daily form, live since 9/01 · enrollments from start dates in the base"},
         {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
-         "widths": [148, 64, 56, 42, 42, 44, 52, 56], "left_cols": 2, "rows": [
+         "widths": [124, 96, 48, 40, 40, 42, 52, 62], "left_cols": 2, "rows": [
             prow("New Leads", None, "day", p["leads"], dead=form_dead),
             prow("Conversations", None, "day", p["conv"], dead=form_dead),
             prow("Tours", None, "day", p["tours"], dead=form_dead),

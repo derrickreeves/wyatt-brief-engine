@@ -137,7 +137,8 @@ def _attention_missed(div_name, rep, form_name, ao=None):
         if not t["on_form"]:
             ask = "no entry for %s (has never filed it)" % yd
         elif t["last"] and t["last"] > ao.isoformat():
-            ask = "no entry for %s (filed %s)" % (yd, ACC._md(t["last"]))
+            ask = ("entry dated %s but none for %s; if those were %s's numbers, fix the date on the form"
+                   % (ACC._md(t["last"]), yd, yd))
         elif t["last"]:
             ask = "no entry for %s (last filed %s)" % (yd, ACC._md(t["last"]))
         else:

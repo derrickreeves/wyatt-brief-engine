@@ -194,7 +194,30 @@ class Doc:
         self._table_header(cols, xs, widths, left_cols)
         stripe = False
         LINE = 10  # extra height per wrapped line (left-aligned text cells wrap; numbers never do)
-        for row in rows:
+        ROW = 16   # base row height (was 18; tightened 2026-10-15 so fewer tables spill a few rows onto a new page)
+        # Widow control: never strand a single row on a new page. Pre-measure the rows and, where a page
+        # break would fall right before the last row, break one row earlier so two rows travel together.
+        def _h(row):
+            m = 1
+            for i, cell in enumerate(row):
+                if i >= left_cols:
+                    continue
+                txt = cell[0] if isinstance(cell, (list, tuple)) else cell
+                bold = bool(cell[2]) if isinstance(cell, (list, tuple)) and len(cell) > 2 else False
+                if txt:
+                    m = max(m, len(simpleSplit(str(txt), "Helvetica-Bold" if bold else "Helvetica", 8.5, widths[i] - 2) or [""]))
+            return ROW + (m - 1) * LINE
+        heights = [_h(r) for r in rows]
+        force_break = set()
+        y = self.y
+        for i, h in enumerate(heights):
+            if y - h < BOTTOM:
+                if i == len(rows) - 1 and i >= 1 and (i - 1) not in force_break:
+                    force_break.add(i - 1)
+                    break
+                y = TOP - 18  # header below the top edge
+            y -= h
+        for idx, row in enumerate(rows):
             # unpack cells once so the row height can account for wrapped text in the left columns
             cells = []
             for i, cell in enumerate(row):
@@ -211,13 +234,13 @@ class Doc:
                     lines = [str(txt)]
                 cells.append((lines, col, font, i))
             nlines = max(len(cl[0]) for cl in cells) if cells else 1
-            rh = 18 + (nlines - 1) * LINE
-            if self.y - rh < BOTTOM:
+            rh = ROW + (nlines - 1) * LINE
+            if self.y - rh < BOTTOM or idx in force_break:
                 self.new_page()
                 self._table_header(cols, xs, widths, left_cols)
             if stripe:
                 c.setFillColor(STRIPE)
-                c.rect(L, self.y - 5 - (rh - 18), R - L, rh, stroke=0, fill=1)
+                c.rect(L, self.y - 5 - (rh - ROW), R - L, rh, stroke=0, fill=1)
             stripe = not stripe
             for lines, col, font, i in cells:
                 c.setFont(font, 8.5)

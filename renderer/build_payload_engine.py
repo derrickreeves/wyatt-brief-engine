@@ -537,7 +537,7 @@ def _ascend(M, ao):
         mrr = sum(x["rate"] for x in pay)
         cols = ["Member", "Member Since", "Days", "MRR"]; widths = [264, 96, 64, 80]
         blocks += [
-            {"kind": "section", "title": "PAYING MEMBERS", "keep": 690, "sub": "%d members · %s MRR · alphabetical" % (len(pay), money(mrr))},
+            {"kind": "section", "title": "PAYING MEMBERS", "keep": 120, "sub": "%d members · %s MRR · alphabetical" % (len(pay), money(mrr))},
             {"kind": "table", "cols": cols, "widths": widths, "left_cols": 1,
              "rows": [_row(x) for x in pay]
                      + [[A("Total", "ink", True), "", "", A(money(mrr), "ink", True)]]},

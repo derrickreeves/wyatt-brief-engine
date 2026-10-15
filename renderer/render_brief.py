@@ -284,7 +284,7 @@ class Doc:
             for ln in body_lines:
                 c.drawString(L + 10, self.y, ln)
                 self.y -= 10
-            self.y -= 8
+            self.y -= 5
 
     def report(self, what, missed, tally, weekend=False, window=""):
         """Who did not file yesterday (amber, bold) and the last-5-business-days tally (muted)."""
@@ -345,7 +345,12 @@ class Doc:
             self.need(14)
             c.drawString(L, self.y, "Nobody. Every form was filed and nothing required is blank.")
             self.y -= 14
-        included = cov.get("included") or []
+        how = cov.get("how") or []
+        if how:
+            self.section("WHERE THE NUMBERS GO", "the places named above · each one feeds this report overnight · keeping them current is the whole job")
+            self.flags([[w, h] for w, h in how])
+        # IN THIS BRIEF retired 2026-10-15: it repeated the opening paragraph and pushed the cover to two pages.
+        included = []
         if included:
             self.section("IN THIS BRIEF", "One card per division, in the locked portfolio order  ·  print-ready")
             for name, line in included:

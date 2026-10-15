@@ -30,6 +30,13 @@ def render(p):
     else:
         out.append("- Nobody. Every form was filed and nothing required is blank.")
     out.append("")
+    how = cov.get("how") or []
+    if how:
+        out.append("**Where the numbers go**")
+        out.append("")
+        for w, h in how:
+            out.append(f"- **{_cell(w)}:** {_cell(h)}")
+        out.append("")
     inc = cov.get("included") or []
     if inc:
         out.append("**Divisions in this brief**")

@@ -145,9 +145,26 @@ def _attention_missed(div_name, rep, form_name, ao=None):
         out.append(_att(t["name"], form_name, ask))
     return out
 
+# Where each number is entered, in words the person entering it can act on. Keyed by the "where" each
+# attention item carries. This is the conversation Wyatt has with that person, so it names the tool,
+# the table or form, and the cadence (Derrick 2026-10-15: "so I'm not the bottleneck").
+_HOW = {
+    "KCM daily form": "Fill out the KCM Daily KPI form in Airtable every business day before you leave: your leads, conversations, "
+                      "showings and pre-approved buyers for that day, with your name selected. Zero is a valid entry; skipping is not.",
+    "Rentals daily form": "Fill out the Rentals Daily KPI form in Airtable every business day before you leave, with your name selected: "
+                          "leads, conversations and appointments (Arkie, Tommy); showings, applications, leases, renewals, notices, evictions (Lara).",
+    "Fundamentals daily form": "Fill out the Fundamentals daily form in Airtable Monday to Friday: new leads, conversations and tours for the day.",
+    "Specs table": "Open the home's row in the KCM Specs table (Airtable, KCM construction base) and update the stage, price and closing date "
+                   "the day they change. Every KCM count and profit figure on this report comes from those rows.",
+    "Flips table": "Open the flip's row in the Flips table (Airtable, KCM construction base) and enter purchase price, rehab budget and projected "
+                   "list when the deal is signed, then contract price and actual rehab cost as they are known.",
+    "Waitlist": "Open the Waitlist table in the Fundamentals base (Airtable) and set each family's Status as things happen: Converted when they "
+                "enroll, Cold after two unanswered calls, Bad Number when the phone is dead. Active Waitlist is every row without one of those.",
+}
+
 def _group_attention(items):
-    """[{who, where, ask}] -> [[person, [line, ...]]], one block per person, asks merged per place.
-    Order: people with the most asks first, then alphabetical."""
+    """[{who, where, ask}] -> [[person, [line, ...]]], one block per person, asks merged per place,
+    each place followed by its How line. Order: people with the most asks first, then alphabetical."""
     by = {}
     for it in items:
         by.setdefault(it["who"], {}).setdefault(it["where"], []).append(it["ask"])
@@ -192,6 +209,12 @@ def build(M, as_of):
         attention += d.pop("attention", []) or []
     P["cover"] = _cover(M)
     P["cover"]["attention"] = _group_attention(attention)
+    # WHERE THE NUMBERS GO: each place named above, explained once, in the order first mentioned.
+    seen = []
+    for it in attention:
+        if it["where"] not in seen and _HOW.get(it["where"]):
+            seen.append(it["where"])
+    P["cover"]["how"] = [[w, _HOW[w]] for w in seen]
     return P
 
 def _wk(as_of):

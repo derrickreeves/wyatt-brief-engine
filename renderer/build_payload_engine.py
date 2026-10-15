@@ -121,11 +121,41 @@ def _report_block(what, rep):
     return {"kind": "report", "what": what, "missed": [ACC.first(x) for x in rep["missed_yest"]],
             "weekend": rep["weekend"], "tally": ACC.tally_text(rep), "window": rep["window"]}
 
-def _attention_missed(div_name, rep):
+def _att(who, where, ask):
+    """One ask for one person. The cover groups these by person: 'who do I need to talk to today, and why'."""
+    return {"who": who, "where": where, "ask": ask}
+
+def _attention_missed(div_name, rep, form_name):
+    """One entry per person who did not file yesterday, in plain words."""
     if rep["weekend"] or not rep["missed_yest"]:
         return []
-    return [["%s: did not report yesterday — %s" % (div_name, ", ".join(ACC.first(x) for x in rep["missed_yest"])),
-             "Daily form not filed for %s. Last 5 business days: %s." % ("yesterday", ACC.tally_text(rep))]]
+    out = []
+    for t in rep["tally"]:
+        if t["name"] not in rep["missed_yest"]:
+            continue
+        if not t["on_form"]:
+            why = "has never filed it"
+        elif t["last"]:
+            why = "last filed %s" % ACC._md(t["last"])
+        else:
+            why = "not filed"
+        out.append(_att(t["name"], form_name, "did not file yesterday (%s)" % why))
+    return out
+
+def _group_attention(items):
+    """[{who, where, ask}] -> [[person, [line, ...]]], one block per person, asks merged per place.
+    Order: people with the most asks first, then alphabetical."""
+    by = {}
+    for it in items:
+        by.setdefault(it["who"], {}).setdefault(it["where"], []).append(it["ask"])
+    out = []
+    for who, places in by.items():
+        lines = []
+        for where, asks in places.items():
+            lines.append("%s: %s." % (where, "; ".join(asks)))
+        out.append([who, lines])
+    out.sort(key=lambda x: (-sum(len(v) for v in by[x[0]].values()), ACC.first(x[0]).lower()))
+    return out
 
 def _goaltxt(goal, cad, money=False, event=False):
     if goal in (None, ""):
@@ -145,7 +175,7 @@ def build(M, as_of):
                       % (as_of.strftime("%A, %B %-d, %Y"), as_of.strftime("%-m/%-d"),
                          _wk(as_of)[0], _wk(as_of)[1], as_of.replace(day=1).strftime("%-m/%-d"), as_of.strftime("%-m/%-d")),
         "as_of_short": as_of.strftime("%b %-d, %Y"),
-        "brief_foot": "Only validated numbers appear · one card per division, live-derived nightly · Owners and goals come from Scorecard Mapping · Questions: reply to the Slack ping",
+        "brief_foot": "One card per division, pulled nightly from the team's records · owners and goals come from the Scorecard Mapping · Questions: reply to the Slack ping",
         # Fundamentals joins after Rentals in the locked order, gated by FELC_GO_LIVE_AS_OF in
         # build_brief (first five-card send targeted Fri 2026-09-04, as_of 9/03).
         "divisions": [_kcm(M, as_of), _ascend(M, as_of), _coworking(M, as_of), _rentals(M, as_of)]
@@ -158,7 +188,7 @@ def build(M, as_of):
     for d in P["divisions"]:
         attention += d.pop("attention", []) or []
     P["cover"] = _cover(M)
-    P["cover"]["attention"] = attention
+    P["cover"]["attention"] = _group_attention(attention)
     return P
 
 def _wk(as_of):
@@ -181,7 +211,8 @@ def _cover(M):
         "health": ("KCM has %d homes under construction (%d of them already listed) and %d active listings, with deal detail below. "
                    "Ascend holds %d paying members and its paid engine keeps improving. Coworking sits at %d members. "
                    "Rentals occupancy is %s%%.%s "
-                   "Every number is computed live from source and validated before send."
+                   "Every number is pulled from the team's own records at 1:15 AM. When an entry is missing or out of date, "
+                   "WHO TO TALK TO TODAY names the person who keeps that record."
                    % (ks["under_construction"], ks["uc_listed"], ks["active"], ar["members"], cr["members"]+cr["unpaid"],
                       _pct(ro["occ"]), felc_health)),
         "included": [
@@ -221,7 +252,7 @@ def _kcm(M, ao):
     form_rows = ["Conversations", "New Leads", "Buyer Showings", "Showings on Listing", "Pre-approved Buyers", "Pre-Sold Contracts"]
     reporters = _expected(M, "kcm", form_rows, ["Danielle", "Laurie", "Tommy", "Gabby"])
     rep = ACC.reporting(M.get("kcm_submits") or {}, reporters, ao)
-    attention = _attention_missed("KCM", rep)
+    attention = _attention_missed("KCM", rep, "KCM daily form")
     blocks = [
         {"kind": "section", "title": "PORTFOLIO SNAPSHOT", "sub": "live from the KCM construction base at build time"},
         {"kind": "cards", "items": [
@@ -309,36 +340,37 @@ def _kcm(M, ao):
     loans_owner = ACC.names(_owners(M, "kcm", "Open Construction Loans"), "Randall")
     specs_owner = ACC.names(_owners(M, "kcm", "Under Contract"), "Gabby")
     flips_owner = ACC.names(_owners(M, "kcm", "Active Flips"), "Randall")
-    flag_items = [
-        ["Construction Funds Available excluded: %s · %s" % (sid, loans_owner),
-         "The base holds %s for this spec, which cannot be right (negative or larger than the loan). Treated as blank "
-         "until the field is corrected; the funds and capacity numbers above exclude it." % money(val)]
-        for sid, val in dropped]
+    flag_items = []
+    for sid, val in dropped:
+        flag_items.append(["%s: construction funds available left out · %s" % (sid, loans_owner),
+                           "The Specs table shows %s, which cannot be right (negative, or more than the loan). The funds and "
+                           "capacity numbers above leave it out until it is corrected." % money(val)])
+        for o in (_owners(M, "kcm", "Open Construction Loans") or ["Randall Landry"]):
+            attention.append(_att(o, "Specs table", "correct construction funds available for %s (shows %s)" % (sid, money(val))))
     # A spec whose projected close has passed but still sits Under Contract is a stage nobody updated —
     # and it is why the opening paragraph and Specs Sold can read wrong (Wyatt 10/15).
     for r in uc:
         if r.get("close") and r["close"][:10] < ao.isoformat():
-            flag_items.append(["%s: projected close %s/%s has passed, still Under Contract · %s"
-                               % (r["addr"], r["close"][5:7].lstrip("0"), r["close"][8:10].lstrip("0"), specs_owner),
-                               "Either the closing slipped (update the projected close) or it closed (move the spec to Sold). "
-                               "Until then Specs Sold undercounts and the Under Contract total overstates."])
-            attention.append(["KCM: %s closing date passed, stage not updated · %s" % (r["addr"], specs_owner),
-                              "Projected close %s; the base still says Under Contract. Specs Sold reads low until it is moved." % r["close"][:10]])
+            cl = "%s/%s" % (r["close"][5:7].lstrip("0"), r["close"][8:10].lstrip("0"))
+            flag_items.append(["%s: closing date %s has passed, still shown Under Contract · %s" % (r["addr"], cl, specs_owner),
+                               "If it closed, move it to Sold. If the closing slipped, update the date. Until then Specs Sold reads low."])
+            for o in (_owners(M, "kcm", "Under Contract") or ["Gabby Theriot"]):
+                attention.append(_att(o, "Specs table", "%s shows a %s closing that has passed; mark it Sold or update the date" % (r["addr"], cl)))
     if fl:
         for r in fl["rows"]:
             if r["phase"] == "Sold":
                 continue
             miss = [n for n, v in (("Purchase Price", r["purch"]), ("Rehab Budget", r["rehab"]), ("Projected List", r["proj_list"])) if v is None]
             if miss:
-                flag_items.append(["Flip %s: %s not entered · %s" % (r["addr"], ", ".join(miss), flips_owner),
-                                   "Blank in the Flips table, so the flips block prints MISSING and this flip is left out of projected profit. Nothing is assumed as $0."])
-                attention.append(["Flips: %s missing %s · %s" % (r["addr"], ", ".join(miss), flips_owner),
-                                  "Enter them in the KCM Flips table and the profit math fills in the next morning."])
-        flag_items += [["Flip %s: %s · %s" % (addr, gaps.rstrip(";"), flips_owner),
-                        "Flagged by the Flips table's own Data Gap formula."]
-                       for addr, gaps in fl["flags"]]
+                flag_items.append(["%s: %s not entered · %s" % (r["addr"], ", ".join(miss).lower(), flips_owner),
+                                   "Blank in the Flips table, so the row reads MISSING and this flip is left out of the profit total. Nothing is assumed as $0."])
+                for o in (_owners(M, "kcm", "Active Flips") or ["Randall Landry"]):
+                    attention.append(_att(o, "Flips table", "%s needs %s" % (r["addr"], ", ".join(miss).lower())))
+        for addr, gaps in fl["flags"]:
+            flag_items.append(["%s: %s · %s" % (addr, gaps.rstrip(";").replace("missing", "not entered"), flips_owner),
+                               "Fill it in on the Flips table."])
     if flag_items:
-        blocks.append({"kind": "section", "title": "DATA FLAGS", "sub": "known gaps, named rather than hidden · the name is who enters the data"})
+        blocks.append({"kind": "section", "title": "DATA FLAGS", "sub": "known gaps, named rather than hidden · the name is who keeps that record"})
         blocks.append({"kind": "flags", "items": flag_items})
     return {"title": "Kaizen Construction Management", "attention": attention,
             "foot": "Sources: KCM construction base (live derivation) + team daily forms · owners from Scorecard Mapping",
@@ -414,9 +446,9 @@ def _flips_blocks(M, ao):
             ["Avg Days Held (Active)", str(s["avg_days"]) if s["avg_days"] is not None else "-", "acquisition to today", ""]]},
         {"kind": "table", "cols": ["Flip", "Stage", "Days", "Purchase", "Rehab Budget", "Proj. List", "Contract", "Profit"],
          "widths": [116, 92, 34, 52, 56, 52, 50, 52], "left_cols": 2, "rows": rows,
-         "note": "Profit = projected (list minus rehab budget, purchase, closing, financing and holding costs) until a contract or sale price is entered; "
-                 "then * = actual profit against that price, the same way Specs read once the list price becomes the sale price. "
-                 "MISSING = a required field is blank in the Flips table; data owner %s (Scorecard Mapping). See Data Flags." % flips_owner},
+         "note": "Profit is projected (list price less rehab budget, purchase, closing, financing and holding costs) until a contract price is entered; "
+                 "then * = what the flip actually makes or loses at that price, the same way Specs read once a home is under contract. "
+                 "MISSING = not yet entered in the Flips table, which %s keeps. See Data Flags." % flips_owner},
     ]
     return blocks
 
@@ -617,7 +649,7 @@ def _rentals(M, ao):
     pm_reporters = _expected(M, "rentals", pm_rows, ["Lara Harris"])
     rep_all = ACC.reporting(M.get("rentals_submits") or {}, reporters, ao)
     rep_pm = ACC.reporting(M.get("rentals_submits") or {}, pm_reporters, ao)
-    attention = _attention_missed("Rentals", rep_all)
+    attention = _attention_missed("Rentals", rep_all, "Rentals daily form")
     snap_sub = "Buildium via the nightly sync" + ((" · snapshot dated %s" % o["snap_date"]) if o.get("snap_date") else "")
     vac_txt = ("%d vacant" % o["vacant_total"]) if o.get("vacant_total") is not None else ""
     prop_rows = [[p["name"], str(p["units"]), str(p["vac"]),
@@ -797,15 +829,16 @@ def _fundamentals(M, ao):
     # Paige's M-F form has one submitter; expected = registry owners of its three rows.
     reporters = _expected(M, "fundamentals", ["New Leads", "Conversations", "Tours"], ["Paige Comeaux"])
     rep = ACC.reporting({ACC.first(reporters[0]): set(p.get("form_dates") or [])}, reporters, ao)
-    attention = _attention_missed("Fundamentals", rep)
+    attention = _attention_missed("Fundamentals", rep, "Fundamentals daily form")
     wl_owner = ACC.names(_owners(M, "fundamentals", "Waitlist"), "Paige")
     wl_exits = o.get("waitlist_converted", 0) + o.get("waitlist_cold", 0)
     wl_since = o.get("waitlist_since") or ""
     wl_since_txt = ("%d/%d" % (int(wl_since[5:7]), int(wl_since[8:10]))) if len(wl_since) >= 10 else "load"
     if wl_exits == 0:
-        attention.append(["Fundamentals: waitlist has no exits since %s · %s" % (wl_since_txt, wl_owner),
-                          "%d families read as active and none has been marked Converted or Cold, so the number can only grow. "
-                          "Flip Status when a family enrolls or stops answering and the count becomes real." % o["waitlist_active"]])
+        for own in (_owners(M, "fundamentals", "Waitlist") or ["Paige Comeaux"]):
+            attention.append(_att(own, "Waitlist",
+                                  "%d families are still marked active and none has been moved to Converted or Cold since the %s load, "
+                                  "so the waitlist number only ever grows" % (o["waitlist_active"], wl_since_txt)))
     enr_goal = _gnum(M, "fundamentals", "Kids Enrolled")
     open_goal = _gnum(M, "fundamentals", "Openings")
     wl_goal = _gnum(M, "fundamentals", "Waitlist")
@@ -886,7 +919,7 @@ def _fundamentals(M, ao):
     q = fl["children"] + fl["staff"] + fl["waitlist"]
     if q:
         flag_items.append(["Data backfill queue: %d records · %s" % (q, wl_owner),
-                           "%d children, %d staff, %d waitlist rows flagged in the base for missing dates, contacts or certs. Paige works the queue from the Data Flags view." % (fl["children"], fl["staff"], fl["waitlist"])])
+                           "%d children, %d staff, %d waitlist rows are missing dates, contacts or certs in the Fundamentals base." % (fl["children"], fl["staff"], fl["waitlist"])])
     if flag_items:
         blocks += [{"kind": "section", "title": "DATA FLAGS", "sub": "known gaps, named rather than hidden"},
                    {"kind": "flags", "items": flag_items}]

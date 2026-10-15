@@ -243,7 +243,12 @@ class Doc:
         for item in items:
             title, body = item[0], item[1]
             tcol = color(item[2]) if len(item) > 2 and item[2] else INK
-            body_lines = simpleSplit(body, "Helvetica", 8, R - L - 10)
+            if isinstance(body, (list, tuple)):
+                body_lines = []
+                for part in body:
+                    body_lines += simpleSplit(part, "Helvetica", 8, R - L - 10)
+            else:
+                body_lines = simpleSplit(body, "Helvetica", 8, R - L - 10)
             self.need(11 + len(body_lines) * 10 + 8)
             c.setFillColor(tcol)
             c.circle(L + 2.5, self.y + 3, 1.6, stroke=0, fill=1)
@@ -308,14 +313,14 @@ class Doc:
             self.health(cov["health"])
         attention = cov.get("attention") or []
         if attention:
-            self.section("NEEDS ATTENTION", "every gap carries the name of the person who enters that data (owners from Scorecard Mapping)")
+            self.section("WHO TO TALK TO TODAY, AND WHY", "each person keeps the record the missing or stale number comes from")
             self.flags([[a[0], a[1], "amber"] for a in attention])
         else:
-            self.section("NEEDS ATTENTION", "every gap carries the name of the person who enters that data")
+            self.section("WHO TO TALK TO TODAY, AND WHY", "each person keeps the record the missing or stale number comes from")
             c.setFont("Helvetica", 8.5)
             c.setFillColor(color("green"))
             self.need(14)
-            c.drawString(L, self.y, "Nothing outstanding: every form was filed and no required field is blank.")
+            c.drawString(L, self.y, "Nobody. Every form was filed and nothing required is blank.")
             self.y -= 14
         included = cov.get("included") or []
         if included:

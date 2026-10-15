@@ -20,14 +20,15 @@ def render(p):
         out.append(f"**Portfolio health:** {cov['health']}")
         out.append("")
     att = cov.get("attention") or []
-    out.append("**Needs attention** (every gap carries the name of the person who enters that data)")
+    out.append("**Who to talk to today, and why** (each person keeps the record the missing or stale number comes from)")
     out.append("")
     if att:
         for it in att:
-            it = list(it) + ["", ""]
-            out.append(f"- **{_cell(it[0])}** {_cell(it[1])}".rstrip())
+            who, lines = it[0], it[1]
+            lines = lines if isinstance(lines, list) else [str(lines)]
+            out.append(f"- **{_cell(who)}** " + " ".join(_cell(x) for x in lines))
     else:
-        out.append("- Nothing outstanding: every form was filed and no required field is blank.")
+        out.append("- Nobody. Every form was filed and nothing required is blank.")
     out.append("")
     inc = cov.get("included") or []
     if inc:

@@ -145,23 +145,6 @@ def _attention_missed(div_name, rep, form_name, ao=None):
         out.append(_att(t["name"], form_name, ask))
     return out
 
-# Where each number is entered, in words the person entering it can act on. Keyed by the "where" each
-# attention item carries. This is the conversation Wyatt has with that person, so it names the tool,
-# the table or form, and the cadence (Derrick 2026-10-15: "so I'm not the bottleneck").
-_HOW = {
-    "KCM daily form": "Fill out the KCM Daily KPI form in Airtable every business day before you leave: your leads, conversations, "
-                      "showings and pre-approved buyers for that day, with your name selected. Zero is a valid entry; skipping is not.",
-    "Rentals daily form": "Fill out the Rentals Daily KPI form in Airtable every business day before you leave, with your name selected: "
-                          "leads, conversations and appointments (Arkie, Tommy); showings, applications, leases, renewals, notices, evictions (Lara).",
-    "Fundamentals daily form": "Fill out the Fundamentals daily form in Airtable Monday to Friday: new leads, conversations and tours for the day.",
-    "Specs table": "Open the home's row in the KCM Specs table (Airtable, KCM construction base) and update the stage, price and closing date "
-                   "the day they change. Every KCM count and profit figure on this report comes from those rows.",
-    "Flips table": "Open the flip's row in the Flips table (Airtable, KCM construction base) and enter purchase price, rehab budget and projected "
-                   "list when the deal is signed, then contract price and actual rehab cost as they are known.",
-    "Waitlist": "Open the Waitlist table in the Fundamentals base (Airtable) and set each family's Status as things happen: Converted when they "
-                "enroll, Cold after two unanswered calls, Bad Number when the phone is dead. Active Waitlist is every row without one of those.",
-}
-
 def _group_attention(items):
     """[{who, where, ask}] -> [[person, [line, ...]]], one block per person, asks merged per place,
     each place followed by its How line. Order: people with the most asks first, then alphabetical."""
@@ -209,12 +192,6 @@ def build(M, as_of):
         attention += d.pop("attention", []) or []
     P["cover"] = _cover(M)
     P["cover"]["attention"] = _group_attention(attention)
-    # WHERE THE NUMBERS GO: each place named above, explained once, in the order first mentioned.
-    seen = []
-    for it in attention:
-        if it["where"] not in seen and _HOW.get(it["where"]):
-            seen.append(it["where"])
-    P["cover"]["how"] = [[w, _HOW[w]] for w in seen]
     return P
 
 def _wk(as_of):
@@ -278,7 +255,7 @@ def _kcm(M, ao):
     form_rows = ["Conversations", "New Leads", "Buyer Showings", "Showings on Listing", "Pre-approved Buyers", "Pre-Sold Contracts"]
     reporters = _expected(M, "kcm", form_rows, ["Danielle", "Laurie", "Tommy", "Gabby"])
     rep = ACC.reporting(M.get("kcm_submits") or {}, reporters, ao)
-    attention = _attention_missed("KCM", rep, "KCM daily form", ao)
+    attention = _attention_missed("KCM", rep, "Fill out the KCM Daily KPI form in Airtable", ao)
     blocks = [
         {"kind": "section", "title": "PORTFOLIO SNAPSHOT", "sub": "live from the KCM construction base at build time"},
         {"kind": "cards", "items": [
@@ -372,7 +349,7 @@ def _kcm(M, ao):
                            "The Specs table shows %s, which cannot be right (negative, or more than the loan). The funds and "
                            "capacity numbers above leave it out until it is corrected." % money(val)])
         for o in (_owners(M, "kcm", "Open Construction Loans") or ["Randall Landry"]):
-            attention.append(_att(o, "Specs table", "correct construction funds available for %s (shows %s)" % (sid, money(val))))
+            attention.append(_att(o, "Update the KCM Specs table in Airtable", "correct construction funds available for %s (shows %s)" % (sid, money(val))))
     # A spec whose projected close has passed but still sits Under Contract is a stage nobody updated —
     # and it is why the opening paragraph and Specs Sold can read wrong (Wyatt 10/15).
     for r in uc:
@@ -381,7 +358,7 @@ def _kcm(M, ao):
             flag_items.append(["%s: closing date %s has passed, still shown Under Contract · %s" % (r["addr"], cl, specs_owner),
                                "If it closed, move it to Sold. If the closing slipped, update the date. Until then Specs Sold reads low."])
             for o in (_owners(M, "kcm", "Under Contract") or ["Gabby Theriot"]):
-                attention.append(_att(o, "Specs table", "%s shows a %s closing that has passed; mark it Sold or update the date" % (r["addr"], cl)))
+                attention.append(_att(o, "Update the KCM Specs table in Airtable", "%s shows a %s closing that has passed; mark it Sold or update the date" % (r["addr"], cl)))
     if fl:
         for r in fl["rows"]:
             if r["phase"] == "Sold":
@@ -391,7 +368,7 @@ def _kcm(M, ao):
                 flag_items.append(["%s: %s not entered · %s" % (r["addr"], ", ".join(miss).lower(), flips_owner),
                                    "Blank in the Flips table, so the row reads MISSING and this flip is left out of the profit total. Nothing is assumed as $0."])
                 for o in (_owners(M, "kcm", "Active Flips") or ["Randall Landry"]):
-                    attention.append(_att(o, "Flips table", "%s needs %s" % (r["addr"], ", ".join(miss).lower())))
+                    attention.append(_att(o, "Update the Flips table in Airtable", "%s needs %s" % (r["addr"], ", ".join(miss).lower())))
         for addr, gaps in fl["flags"]:
             flag_items.append(["%s: %s · %s" % (addr, gaps.rstrip(";").replace("missing", "not entered"), flips_owner),
                                "Fill it in on the Flips table."])
@@ -675,7 +652,7 @@ def _rentals(M, ao):
     pm_reporters = _expected(M, "rentals", pm_rows, ["Lara Harris"])
     rep_all = ACC.reporting(M.get("rentals_submits") or {}, reporters, ao)
     rep_pm = ACC.reporting(M.get("rentals_submits") or {}, pm_reporters, ao)
-    attention = _attention_missed("Rentals", rep_all, "Rentals daily form", ao)
+    attention = _attention_missed("Rentals", rep_all, "Fill out the Rentals Daily KPI form in Airtable", ao)
     snap_sub = "Buildium via the nightly sync" + ((" · snapshot dated %s" % o["snap_date"]) if o.get("snap_date") else "")
     vac_txt = ("%d vacant" % o["vacant_total"]) if o.get("vacant_total") is not None else ""
     prop_rows = [[p["name"], str(p["units"]), str(p["vac"]),
@@ -855,16 +832,16 @@ def _fundamentals(M, ao):
     # Paige's M-F form has one submitter; expected = registry owners of its three rows.
     reporters = _expected(M, "fundamentals", ["New Leads", "Conversations", "Tours"], ["Paige Comeaux"])
     rep = ACC.reporting({ACC.first(reporters[0]): set(p.get("form_dates") or [])}, reporters, ao)
-    attention = _attention_missed("Fundamentals", rep, "Fundamentals daily form", ao)
+    attention = _attention_missed("Fundamentals", rep, "Fill out the Fundamentals daily form in Airtable", ao)
     wl_owner = ACC.names(_owners(M, "fundamentals", "Waitlist"), "Paige")
     wl_exits = o.get("waitlist_converted", 0) + o.get("waitlist_cold", 0)
     wl_since = o.get("waitlist_since") or ""
     wl_since_txt = ("%d/%d" % (int(wl_since[5:7]), int(wl_since[8:10]))) if len(wl_since) >= 10 else "load"
     if wl_exits == 0:
         for own in (_owners(M, "fundamentals", "Waitlist") or ["Paige Comeaux"]):
-            attention.append(_att(own, "Waitlist",
-                                  "%d families are still marked active and none has been moved to Converted or Cold since the %s load, "
-                                  "so the waitlist number only ever grows" % (o["waitlist_active"], wl_since_txt)))
+            attention.append(_att(own, "Update the Waitlist table in Airtable (Fundamentals base)",
+                                  "%d families are still marked active and none has been moved to Converted or Cold since the %s load; "
+                                  "set each family's Status (Converted, Cold, Bad Number) so the count is real" % (o["waitlist_active"], wl_since_txt)))
     enr_goal = _gnum(M, "fundamentals", "Kids Enrolled")
     open_goal = _gnum(M, "fundamentals", "Openings")
     wl_goal = _gnum(M, "fundamentals", "Waitlist")

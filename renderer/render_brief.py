@@ -336,10 +336,10 @@ class Doc:
             self.health(cov["health"])
         attention = cov.get("attention") or []
         if attention:
-            self.section("WHO TO TALK TO TODAY, AND WHY", "each person keeps the record the missing or stale number comes from")
+            self.section("WHO TO TALK TO TODAY, AND WHY", "what each person needs to do, and where")
             self.flags([[a[0], a[1], "amber"] for a in attention])
         else:
-            self.section("WHO TO TALK TO TODAY, AND WHY", "each person keeps the record the missing or stale number comes from")
+            self.section("WHO TO TALK TO TODAY, AND WHY", "what each person needs to do, and where")
             c.setFont("Helvetica", 8.5)
             c.setFillColor(color("green"))
             self.need(14)

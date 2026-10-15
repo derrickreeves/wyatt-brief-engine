@@ -125,7 +125,7 @@ def _att(who, where, ask):
     """One ask for one person. The cover groups these by person: 'who do I need to talk to today, and why'."""
     return {"who": who, "where": where, "ask": ask}
 
-def _attention_missed(div_name, rep, form_name):
+def _attention_missed(div_name, rep, form_name, ao=None):
     """One entry per person who did not file yesterday, in plain words."""
     if rep["weekend"] or not rep["missed_yest"]:
         return []
@@ -133,13 +133,16 @@ def _attention_missed(div_name, rep, form_name):
     for t in rep["tally"]:
         if t["name"] not in rep["missed_yest"]:
             continue
+        yd = ACC._md(ao.isoformat())
         if not t["on_form"]:
-            why = "has never filed it"
+            ask = "no entry for %s (has never filed it)" % yd
+        elif t["last"] and t["last"] > ao.isoformat():
+            ask = "no entry for %s (filed %s)" % (yd, ACC._md(t["last"]))
         elif t["last"]:
-            why = "last filed %s" % ACC._md(t["last"])
+            ask = "no entry for %s (last filed %s)" % (yd, ACC._md(t["last"]))
         else:
-            why = "not filed"
-        out.append(_att(t["name"], form_name, "did not file yesterday (%s)" % why))
+            ask = "no entry for %s" % yd
+        out.append(_att(t["name"], form_name, ask))
     return out
 
 def _group_attention(items):
@@ -222,7 +225,7 @@ def _cover(M):
             ["Rentals", "%s%% occupancy across %d units" % (_pct(ro["occ"]), ro["units"] or 0)],
         ] + felc_line + team_line,
         "coming": coming,
-        "note": "Divisions join as their cards are verified, in the locked portfolio order.",
+        "note": "",
     }
 
 def _pct(x):
@@ -252,7 +255,7 @@ def _kcm(M, ao):
     form_rows = ["Conversations", "New Leads", "Buyer Showings", "Showings on Listing", "Pre-approved Buyers", "Pre-Sold Contracts"]
     reporters = _expected(M, "kcm", form_rows, ["Danielle", "Laurie", "Tommy", "Gabby"])
     rep = ACC.reporting(M.get("kcm_submits") or {}, reporters, ao)
-    attention = _attention_missed("KCM", rep, "KCM daily form")
+    attention = _attention_missed("KCM", rep, "KCM daily form", ao)
     blocks = [
         {"kind": "section", "title": "PORTFOLIO SNAPSHOT", "sub": "live from the KCM construction base at build time"},
         {"kind": "cards", "items": [
@@ -649,7 +652,7 @@ def _rentals(M, ao):
     pm_reporters = _expected(M, "rentals", pm_rows, ["Lara Harris"])
     rep_all = ACC.reporting(M.get("rentals_submits") or {}, reporters, ao)
     rep_pm = ACC.reporting(M.get("rentals_submits") or {}, pm_reporters, ao)
-    attention = _attention_missed("Rentals", rep_all, "Rentals daily form")
+    attention = _attention_missed("Rentals", rep_all, "Rentals daily form", ao)
     snap_sub = "Buildium via the nightly sync" + ((" · snapshot dated %s" % o["snap_date"]) if o.get("snap_date") else "")
     vac_txt = ("%d vacant" % o["vacant_total"]) if o.get("vacant_total") is not None else ""
     prop_rows = [[p["name"], str(p["units"]), str(p["vac"]),
@@ -829,7 +832,7 @@ def _fundamentals(M, ao):
     # Paige's M-F form has one submitter; expected = registry owners of its three rows.
     reporters = _expected(M, "fundamentals", ["New Leads", "Conversations", "Tours"], ["Paige Comeaux"])
     rep = ACC.reporting({ACC.first(reporters[0]): set(p.get("form_dates") or [])}, reporters, ao)
-    attention = _attention_missed("Fundamentals", rep, "Fundamentals daily form")
+    attention = _attention_missed("Fundamentals", rep, "Fundamentals daily form", ao)
     wl_owner = ACC.names(_owners(M, "fundamentals", "Waitlist"), "Paige")
     wl_exits = o.get("waitlist_converted", 0) + o.get("waitlist_cold", 0)
     wl_since = o.get("waitlist_since") or ""

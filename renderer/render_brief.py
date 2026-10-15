@@ -362,13 +362,14 @@ class Doc:
                 self.y -= 6
         coming = cov.get("coming") or []
         if coming:
-            self.section("COMING ONLINE", "Divisions joining the brief as their cards are verified")
-            c.setFont("Helvetica", 8.5)
-            c.setFillColor(MUTED)
-            for ln in simpleSplit("  ·  ".join(coming), "Helvetica", 8.5, R - L):
-                self.need(12)
+            # one compact line, never its own section (a lone "COMING ONLINE" header spilled onto page 2 on 10/15)
+            self.y -= 4
+            for ln in simpleSplit("Coming online as their cards are verified: " + "  ·  ".join(coming), "Helvetica", 8, R - L):
+                self.need(11)
+                c.setFont("Helvetica", 8)
+                c.setFillColor(MUTED)
                 c.drawString(L, self.y, ln)
-                self.y -= 11.5
+                self.y -= 10.5
         if cov.get("note"):
             self.y -= 8
             c.setFont("Helvetica", 6.8)

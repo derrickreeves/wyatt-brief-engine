@@ -81,6 +81,52 @@ def _gnum(M, div, name):
         return row["goal"]
     return None
 
+import accountability as ACC
+
+# ---- registry-driven OWNERS (Scorecard Mapping is the source of truth for owners too; 2026-10-15) ----
+def _owners(M, div, label):
+    """Owner names for a report row, from the live registry pull. Same alias map as goals. A ("sum", [...])
+    spec unions the owners of every summed row. Empty when the registry has no match or the pull was
+    saved without the Owner field, in which case the caller's literal is the fallback."""
+    reg = M.get("registry_goals", {}).get(div, {})
+    spec = _ALIAS.get(div, {}).get(label, label)
+    union = isinstance(spec, tuple)
+    names = spec[1] if union else (spec if isinstance(spec, list) else [spec])
+    out = []
+    for n in names:
+        row = reg.get(str(n).strip().lower())
+        if row is None:
+            continue
+        for o in row.get("owners") or []:
+            if o not in out:
+                out.append(o)
+        if not union:
+            break
+    return out
+
+def _own(M, div, label, fb):
+    return ACC.label(_owners(M, div, label), fb)
+
+def _expected(M, div, labels, fb):
+    """Who is expected to file a division's daily form = the registry owners across its form rows."""
+    out = []
+    for lb in labels:
+        for o in _owners(M, div, lb):
+            if o not in out:
+                out.append(o)
+    return out or list(fb)
+
+def _report_block(what, rep):
+    """The accountability line under a daily-forms table."""
+    return {"kind": "report", "what": what, "missed": [ACC.first(x) for x in rep["missed_yest"]],
+            "weekend": rep["weekend"], "tally": ACC.tally_text(rep), "window": rep["window"]}
+
+def _attention_missed(div_name, rep):
+    if rep["weekend"] or not rep["missed_yest"]:
+        return []
+    return [["%s: did not report yesterday — %s" % (div_name, ", ".join(ACC.first(x) for x in rep["missed_yest"])),
+             "Daily form not filed for %s. Last 5 business days: %s." % ("yesterday", ACC.tally_text(rep))]]
+
 def _goaltxt(goal, cad, money=False, event=False):
     if goal in (None, ""):
         return "-"
@@ -99,14 +145,20 @@ def build(M, as_of):
                       % (as_of.strftime("%A, %B %-d, %Y"), as_of.strftime("%-m/%-d"),
                          _wk(as_of)[0], _wk(as_of)[1], as_of.replace(day=1).strftime("%-m/%-d"), as_of.strftime("%-m/%-d")),
         "as_of_short": as_of.strftime("%b %-d, %Y"),
-        "brief_foot": "Only validated numbers appear · one card per division, live-derived nightly · Questions: reply to the Slack ping or ask the engine",
-        "cover": _cover(M),
+        "brief_foot": "Only validated numbers appear · one card per division, live-derived nightly · Owners and goals come from Scorecard Mapping · Questions: reply to the Slack ping",
         # Fundamentals joins after Rentals in the locked order, gated by FELC_GO_LIVE_AS_OF in
         # build_brief (first five-card send targeted Fri 2026-09-04, as_of 9/03).
         "divisions": [_kcm(M, as_of), _ascend(M, as_of), _coworking(M, as_of), _rentals(M, as_of)]
                      + ([_fundamentals(M, as_of)] if "felc_ov" in M else [])
                      + ([_team(M, as_of)] if M.get("fub_loaded") else []),
     }
+    # NEEDS ATTENTION on the cover (2026-10-15, Wyatt's ask): every gap in the brief carries a name.
+    # Each division contributes its own items; the cover just lists them, non-reporters first.
+    attention = []
+    for d in P["divisions"]:
+        attention += d.pop("attention", []) or []
+    P["cover"] = _cover(M)
+    P["cover"]["attention"] = attention
     return P
 
 def _wk(as_of):
@@ -161,8 +213,15 @@ def _kcm(M, ao):
     def frow(label, fb_goal, fb_cad, w):
         g, cad, _ = _rg(M, "kcm", label, fb_goal, fb_cad)
         status = st(w["MTD"], g, cad, ao) if g not in (None, "") else A("--", "light")
-        return [label, "Team", _goaltxt(g, cad),
+        return [label, _own(M, "kcm", label, "Team"), _goaltxt(g, cad),
                 str(w["Yest"]), str(w["WTD"]), str(w["MTD"]), str(w["LastMo"]), status]
+    # Who is expected to file the KCM daily form = the registry owners of its rows; who did = the form's
+    # submitter field. The fallback list is the form's own select choices, used only when the registry
+    # pull carries no owners.
+    form_rows = ["Conversations", "New Leads", "Buyer Showings", "Showings on Listing", "Pre-approved Buyers", "Pre-Sold Contracts"]
+    reporters = _expected(M, "kcm", form_rows, ["Danielle", "Laurie", "Tommy", "Gabby"])
+    rep = ACC.reporting(M.get("kcm_submits") or {}, reporters, ao)
+    attention = _attention_missed("KCM", rep)
     blocks = [
         {"kind": "section", "title": "PORTFOLIO SNAPSHOT", "sub": "live from the KCM construction base at build time"},
         {"kind": "cards", "items": [
@@ -192,14 +251,15 @@ def _kcm(M, ao):
         {"kind": "section", "title": "MONTHLY EVENTS", "sub": "derived live from Specs · Status = on/off the goal's pace this month"},
         {"kind": "table", "cols": ["Event", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
          "widths": [150, 66, 52, 40, 40, 40, 50, 66], "left_cols": 2, "rows": [
-            evrow("New Starts", "Amber", 5, "New Starts"),
-            evrow("Specs Sold", "Danielle", 2, "Specs Sold"),
-            evrow("Construction Loans Approved", "Randall", 6, "Loans Approved"),
-            evrow("Lots Funded", "Shane", 2, "Lots Funded"),
-            evrow("Lot Closings", "Shane", 2, "Lot Closings"),
-            evrow("Lot Contracts", "Shane", 2, "Lot Contracts"),
-            evrow("Listed Specs", "Danielle", 7, "Listed Specs")] + _flips_evrows(M, ao)},
-        {"kind": "section", "title": "TEAM ACTIVITY - DAILY FORMS", "sub": "Status = on or off the goal's pace for this point in the month"},
+            evrow("New Starts", _own(M, "kcm", "New Starts", "Amber"), 5, "New Starts"),
+            evrow("Specs Sold", _own(M, "kcm", "Specs Sold", "Danielle"), 2, "Specs Sold"),
+            evrow("Construction Loans Approved", _own(M, "kcm", "Construction Loans Approved", "Randall"), 6, "Loans Approved"),
+            evrow("Lots Funded", _own(M, "kcm", "Lots Funded", "Shane"), 2, "Lots Funded"),
+            evrow("Lot Closings", _own(M, "kcm", "Lot Closings", "Shane"), 2, "Lot Closings"),
+            evrow("Lot Contracts", _own(M, "kcm", "Lot Contracts", "Shane"), 2, "Lot Contracts"),
+            evrow("Listed Specs", _own(M, "kcm", "Listed Specs", "Danielle"), 7, "Listed Specs")] + _flips_evrows(M, ao)},
+        {"kind": "section", "title": "TEAM ACTIVITY - DAILY FORMS",
+         "sub": "reporters: %s · Status = on or off the goal's pace for this point in the month" % ACC.names(reporters)},
         {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
          "widths": [150, 66, 52, 40, 40, 40, 50, 66], "left_cols": 2, "rows": [
             frow("Conversations", 13, "day", f["conv"]),
@@ -207,6 +267,7 @@ def _kcm(M, ao):
             frow("Showings (buyer + listing)", 2, "day", f["show"]),
             frow("Pre-approved Buyers", 1, "day", f["preapp"]),
             frow("Pre-Sold Contracts", 4, "mo", f["presold"])]},
+        _report_block("KCM daily form", rep),
         {"kind": "section", "title": "ACTIVE LISTINGS",
          "sub": "%d listed · %s projected profit · bank and loan drawn per home (added 2026-08-24)" % (len(lst), money(lt))},
         {"kind": "table", "cols": ["Address", "Build Stage", "DOM", "List Price", "Proj. Profit", "Bank", "Drawn · Cap%"],
@@ -245,29 +306,53 @@ def _kcm(M, ao):
     # plus every Flips row whose Data Gap Flag is non-empty. Named rather than hidden, same rule as every other card.
     dropped = M.get("kcm_dropped_funds") or []
     fl = M.get("kcm_flips")
+    loans_owner = ACC.names(_owners(M, "kcm", "Open Construction Loans"), "Randall")
+    specs_owner = ACC.names(_owners(M, "kcm", "Under Contract"), "Gabby")
+    flips_owner = ACC.names(_owners(M, "kcm", "Active Flips"), "Randall")
     flag_items = [
-        ["Construction Funds Available excluded: %s" % sid,
+        ["Construction Funds Available excluded: %s · %s" % (sid, loans_owner),
          "The base holds %s for this spec, which cannot be right (negative or larger than the loan). Treated as blank "
-         "until Randall corrects the field; the funds and capacity numbers above exclude it." % money(val)]
+         "until the field is corrected; the funds and capacity numbers above exclude it." % money(val)]
         for sid, val in dropped]
+    # A spec whose projected close has passed but still sits Under Contract is a stage nobody updated —
+    # and it is why the opening paragraph and Specs Sold can read wrong (Wyatt 10/15).
+    for r in uc:
+        if r.get("close") and r["close"][:10] < ao.isoformat():
+            flag_items.append(["%s: projected close %s/%s has passed, still Under Contract · %s"
+                               % (r["addr"], r["close"][5:7].lstrip("0"), r["close"][8:10].lstrip("0"), specs_owner),
+                               "Either the closing slipped (update the projected close) or it closed (move the spec to Sold). "
+                               "Until then Specs Sold undercounts and the Under Contract total overstates."])
+            attention.append(["KCM: %s closing date passed, stage not updated · %s" % (r["addr"], specs_owner),
+                              "Projected close %s; the base still says Under Contract. Specs Sold reads low until it is moved." % r["close"][:10]])
     if fl:
-        flag_items += [["Flip %s: %s" % (addr, gaps.rstrip(";")),
-                        "Missing in the Flips table. The flips block above prints MISSING for anything these feed; nothing is assumed as $0."]
+        for r in fl["rows"]:
+            if r["phase"] == "Sold":
+                continue
+            miss = [n for n, v in (("Purchase Price", r["purch"]), ("Rehab Budget", r["rehab"]), ("Projected List", r["proj_list"])) if v is None]
+            if miss:
+                flag_items.append(["Flip %s: %s not entered · %s" % (r["addr"], ", ".join(miss), flips_owner),
+                                   "Blank in the Flips table, so the flips block prints MISSING and this flip is left out of projected profit. Nothing is assumed as $0."])
+                attention.append(["Flips: %s missing %s · %s" % (r["addr"], ", ".join(miss), flips_owner),
+                                  "Enter them in the KCM Flips table and the profit math fills in the next morning."])
+        flag_items += [["Flip %s: %s · %s" % (addr, gaps.rstrip(";"), flips_owner),
+                        "Flagged by the Flips table's own Data Gap formula."]
                        for addr, gaps in fl["flags"]]
     if flag_items:
-        blocks.append({"kind": "section", "title": "DATA FLAGS", "sub": "known gaps, named rather than hidden"})
+        blocks.append({"kind": "section", "title": "DATA FLAGS", "sub": "known gaps, named rather than hidden · the name is who enters the data"})
         blocks.append({"kind": "flags", "items": flag_items})
-    return {"title": "Kaizen Construction Management",
-            "foot": "Sources: KCM construction base (live derivation) + team daily forms",
+    return {"title": "Kaizen Construction Management", "attention": attention,
+            "foot": "Sources: KCM construction base (live derivation) + team daily forms · owners from Scorecard Mapping",
             "health": ("%d homes are under construction: %d of them already listed, %d pre-listing, %d pre-sold under contract%s. "
                        "%d homes are actively listed in total (%d still building, %d complete), with %s of projected profit in motion "
                        "across listed, under-contract and coming-to-market inventory. Team activity pace is shown per KPI below."
                        % (s["under_construction"], s["uc_listed"], s["uc_prelist"], s["uc_presold"],
                           (", and %d not yet staged for listing" % s["uc_unstaged"]) if s["uc_unstaged"] else "",
                           s["active"], s["active"] - s["active_done"], s["active_done"], money(profit_motion))
-                       + ((" Flips: %d active (%d selling, %d in rehab, %d acquiring) with %s projected profit; %d sold YTD."
+                       + ((" Flips: %d active (%d selling, %d in rehab, %d acquiring) with %s profit in motion%s; %d sold YTD."
                            % (fl["state"]["active"], fl["state"]["selling"], fl["state"]["rehab"], fl["state"]["acquiring"],
-                              money(fl["state"]["proj"]), fl["state"]["sold_ytd"])) if fl else "")),
+                              money(fl["state"]["motion"]),
+                              (" (%d of %d report)" % (fl["state"]["motion_n"], fl["state"]["active"])) if fl["state"]["motion_n"] != fl["state"]["active"] else "",
+                              fl["state"]["sold_ytd"])) if fl else "")),
             "blocks": blocks}
 
 def _flips_evrows(M, ao):
@@ -281,7 +366,7 @@ def _flips_evrows(M, ao):
         g, cad, _ = _rg(M, "kcm", label, 1, "mo")
         e = fl["events"][label]
         status = st(e["MTD"], g, cad, ao) if g not in (None, "") else A("--", "light")
-        out.append([label, "Team", _goaltxt(g, cad), str(e["Yest"]), str(e["WTD"]), str(e["MTD"]), str(e["LastMo"]), status])
+        out.append([label, _own(M, "kcm", label, "Team"), _goaltxt(g, cad), str(e["Yest"]), str(e["WTD"]), str(e["MTD"]), str(e["LastMo"]), status])
     return out
 
 def _flips_blocks(M, ao):
@@ -300,26 +385,38 @@ def _flips_blocks(M, ao):
         if v is None: return A("MISSING", "amber", True)
         return A(money(v), "amber", True) if v < 0 else money(v)
     active = [r for r in fl["rows"] if r["phase"] != "Sold"]
+    flips_owner = ACC.names(_owners(M, "kcm", "Active Flips"), "Randall")
+    # Profit follows the Specs convention (Wyatt 10/15): projected until a contract / sale price is entered,
+    # then the base's ACTUAL profit against that price. Capital Heights: $9,150 projected, -$17,875 at contract.
+    def profit_cell(r):
+        if r["sale"] is not None and r["nap"] is not None:
+            return A(money(r["nap"]) + " *", "amber" if r["nap"] < 0 else "green", True)
+        return pl(r["npp"])
+    def dash(v):
+        return money(v) if v is not None else "-"
     rows = [[r["addr"], r["stage"], str(r["days"]) if r["days"] is not None else "-",
-             mcell(r["purch"]), mcell(r["rehab"]), mcell(r["proj_list"]), pl(r["npp"])] for r in active]
-    rows.append([A("Total", "ink", True), A("%d active flips" % s["active"], "ink", True), "", "", "", "",
-                 A(money(s["proj"]), "ink", True)])
+             mcell(r["purch"]), mcell(r["rehab"]), mcell(r["proj_list"]), dash(r["sale"]), profit_cell(r)] for r in active]
+    total = s["motion"]
+    rows.append([A("Total", "ink", True), A("%d active flips" % s["active"], "ink", True), "", "", "", "", "",
+                 A(money(total), "ink", True)])
     blocks = [
-        {"kind": "section", "title": "FLIPS", "sub": "%d in motion · %s projected profit%s · live from the KCM Flips table"
-         % (s["active"], money(s["proj"]), "" if s["proj_n"] == s["active"] else " (%d of %d report)" % (s["proj_n"], s["active"]))},
+        {"kind": "section", "title": "FLIPS", "sub": "%d in motion · %s profit in motion%s · live from the KCM Flips table · data owner %s"
+         % (s["active"], money(s["motion"]), "" if s["motion_n"] == s["active"] else " (%d of %d report)" % (s["motion_n"], s["active"]), flips_owner)},
         {"kind": "cards", "items": [
             ["Active Flips", str(s["active"]), "%d selling · %d rehab · %d acquiring" % (s["selling"], s["rehab"], s["acquiring"]), ""],
-            ["Projected Profit (Active)", money(s["proj"]),
-             ("all %d report" % s["active"]) if s["proj_n"] == s["active"] else "%d of %d report profit" % (s["proj_n"], s["active"]),
-             "" if s["proj_n"] == s["active"] else "amber"],
+            ["Profit in Motion (Active)", money(s["motion"]),
+             (("%d under contract at actual" % s["under_contract"]) if s["under_contract"] else "all projected")
+             if s["motion_n"] == s["active"] else "%d of %d report profit" % (s["motion_n"], s["active"]),
+             "" if s["motion_n"] == s["active"] else "amber"],
             ["Flips Sold · YTD", str(s["sold_ytd"]),
              (money(s["realized"]) + " realized") if s["realized_n"] == s["sold_ytd"] else "%d of %d report actual profit" % (s["realized_n"], s["sold_ytd"]),
              "green" if (s["sold_ytd"] and s["realized_n"] == s["sold_ytd"]) else ("amber" if s["sold_ytd"] else "")],
             ["Avg Days Held (Active)", str(s["avg_days"]) if s["avg_days"] is not None else "-", "acquisition to today", ""]]},
-        {"kind": "table", "cols": ["Flip", "Stage", "Days Held", "Purchase", "Rehab Budget", "Proj. List", "Proj. Profit"],
-         "widths": [128, 110, 48, 56, 58, 52, 52], "left_cols": 2, "rows": rows,
-         "note": "Proj. Profit = projected list minus rehab budget, purchase, closing, financing and holding costs (base formula); "
-                 "blank until purchase, rehab budget and projected list are all entered. MISSING = a required field is blank in the Flips table; see Data Flags."},
+        {"kind": "table", "cols": ["Flip", "Stage", "Days", "Purchase", "Rehab Budget", "Proj. List", "Contract", "Profit"],
+         "widths": [116, 92, 34, 52, 56, 52, 50, 52], "left_cols": 2, "rows": rows,
+         "note": "Profit = projected (list minus rehab budget, purchase, closing, financing and holding costs) until a contract or sale price is entered; "
+                 "then * = actual profit against that price, the same way Specs read once the list price becomes the sale price. "
+                 "MISSING = a required field is blank in the Flips table; data owner %s (Scorecard Mapping). See Data Flags." % flips_owner},
     ]
     return blocks
 
@@ -352,11 +449,11 @@ def _ascend(M, ao):
             met = g not in (None, "") and mtd >= g
             mtd_cell = A("%d (met)" % mtd, "green", True) if met else str(mtd)
             status_cell = A("Met", "green", True) if met else A("--", "light")
-            return [label, "Tommy", _goaltxt(g, cad, event=True), str(w["Yest"]), str(w["WTD"]), mtd_cell,
+            return [label, _own(M, "ascend", label, "Tommy"), _goaltxt(g, cad, event=True), str(w["Yest"]), str(w["WTD"]), mtd_cell,
                     lastmo_txt if lastmo_txt is not None else str(w["LastMo"]), status_cell]
         mtd_cell = A("%d (met)" % mtd, "green", True) if (mtd_green and g not in (None, "") and mtd >= g) else str(mtd)
         status = st(mtd, g, cad, ao, direction) if g not in (None, "") else A("--", "light")
-        return [label, "Tommy", _goaltxt(g, cad),
+        return [label, _own(M, "ascend", label, "Tommy"), _goaltxt(g, cad),
                 str(w["Yest"]), str(w["WTD"]), mtd_cell,
                 lastmo_txt if lastmo_txt is not None else str(w["LastMo"]), status]
     blocks = [
@@ -382,14 +479,14 @@ def _ascend(M, ao):
             prow("Churned Members", 1, "mo", p["churn"], direction="down", lastmo_txt="-")]},
         {"kind": "section", "title": "MARKETING ENGINE", "sub": "Meta campaign, launched 7/29 · live from Meta via Windsor"},
         {"kind": "table", "cols": ["Metric", "Owner", "Goal", "Yest", "WTD", "MTD", "Since Launch 7/29"],
-         "widths": [150, 64, 54, 44, 44, 44, 104], "left_cols": 2, "rows": _adrows(a, _adgoals(M, "ascend", "300"))},
+         "widths": [150, 64, 54, 44, 44, 44, 104], "left_cols": 2, "rows": _adrows(a, _adgoals(M, "ascend", "300"), owner=_own(M, "ascend", "Ad Spend", "Derrick"))},
     ]
     org = M.get("ascend_org")
     if org:
         blocks += [
             {"kind": "section", "title": "ORGANIC SOCIAL", "sub": "Ascend Mastermind Community Facebook page · live via Windsor"},
             {"kind": "table", "cols": ["Metric", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo"],
-             "widths": [150, 64, 54, 44, 44, 44, 104], "left_cols": 2, "rows": _orgrows(org, _orggoals(M, "ascend")),
+             "widths": [150, 64, 54, 44, 44, 44, 104], "left_cols": 2, "rows": _orgrows(org, _orggoals(M, "ascend"), owner=_own(M, "ascend", "Organic Posts Published", "Roxanne")),
              "note": "Page followers now %s. Posts counted by publish date; impressions and engagements are page-level daily totals." % num(org["fans_now"]) if org.get("fans_now") is not None else None},
         ]
     ml = M.get("ascend_members") or []
@@ -444,7 +541,7 @@ def _coworking(M, ao):
         cells = [money(w["Yest"]), money(w["WTD"]), money(w["MTD"]), money(w["LastMo"])] if money_row else \
                 [str(w["Yest"]), str(w["WTD"]), str(w["MTD"]), str(w["LastMo"])]
         status = st(mtd, g, cad, ao, direction) if g not in (None, "") else A("--", "light")
-        return [label, "Lindsey", _goaltxt(g, cad, money=money_row)] + cells + [status]
+        return [label, _own(M, "cowork", label, "Lindsey"), _goaltxt(g, cad, money=money_row)] + cells + [status]
     # bk is the upcoming-events dict (rows / beyond_count / beyond_rev) since 2026-08-21;
     # replaces the previous-month bookings listing per Randall's ask.
     from datetime import timedelta
@@ -459,7 +556,7 @@ def _coworking(M, ao):
             ["MRR", money(r["mrr"]), "paying members", "green"],
             ["Churned (all-time)", str(r["churned"]), "", ""],
             ["Ad Leads MTD", str(a["MTD"]["leads"]), money(a["MTD"]["spend"]) + " spend", "green"]]},
-        {"kind": "section", "title": "PIPELINE ACTIVITY", "sub": "owner Lindsey Moore · Status = on/off the goal's pace"},
+        {"kind": "section", "title": "PIPELINE ACTIVITY", "sub": "owners %s · Status = on/off the goal's pace" % ACC.names(_expected(M, "cowork", ["New Leads", "Conversations", "Free Tours Booked", "Events Booked"], ["Lindsey Moore"]))},
         {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
          "widths": [148, 64, 56, 42, 42, 44, 52, 56], "left_cols": 2, "rows": [
             prow("New Leads", 3, "day", p["new_leads"]),
@@ -472,14 +569,14 @@ def _coworking(M, ao):
             prow("Day Passes", 1, "day", p["day_pass"])]},
         {"kind": "section", "title": "MARKETING ENGINE", "sub": "Meta account, live since May 25 · live from Meta via Windsor"},
         {"kind": "table", "cols": ["Metric", "Owner", "Goal", "Yest", "WTD", "MTD", "Since Launch 5/25"],
-         "widths": [148, 64, 56, 42, 42, 44, 108], "left_cols": 2, "rows": _adrows(a, _adgoals(M, "cowork", "300"))},
+         "widths": [148, 64, 56, 42, 42, 44, 108], "left_cols": 2, "rows": _adrows(a, _adgoals(M, "cowork", "300"), owner=_own(M, "cowork", "Ad Spend", "Derrick"))},
     ]
     org = M.get("cowork_org")
     if org:
         blocks += [
             {"kind": "section", "title": "ORGANIC SOCIAL", "sub": "Kaizen Coworking & Event Space Facebook page · live via Windsor"},
             {"kind": "table", "cols": ["Metric", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo"],
-             "widths": [148, 64, 56, 42, 42, 44, 108], "left_cols": 2, "rows": _orgrows(org, _orggoals(M, "cowork")),
+             "widths": [148, 64, 56, 42, 42, 44, 108], "left_cols": 2, "rows": _orgrows(org, _orggoals(M, "cowork"), owner=_own(M, "cowork", "Organic Posts Published", "Roxanne")),
              "note": "Page followers now %s. Posts counted by publish date; impressions and engagements are page-level daily totals." % num(org["fans_now"]) if org.get("fans_now") is not None else None},
         ]
     upcoming_note = "Booked = date the booking came in; Event Date = when the event runs. Window rolls forward every day."
@@ -510,8 +607,17 @@ def _rentals(M, ao):
     def arow(label, fb_goal, fb_cad, owner, w, direction="up"):
         g, cad, _ = _rg(M, "rentals", label, fb_goal, fb_cad)
         status = st(w["MTD"], g, cad, ao, direction) if g not in (None, "") else A("--", "light")
-        return [label, owner, _goaltxt(g, cad),
+        return [label, _own(M, "rentals", label, owner), _goaltxt(g, cad),
                 str(w["Yest"]), str(w["WTD"]), str(w["MTD"]), str(w["LastMo"]), status]
+    # Expected reporters for the Rentals daily forms = registry owners of the form rows; actual = Entry Type.
+    form_rows = ["Leads", "Conversations", "Appointments Set", "Showings", "Applications", "New Leases",
+                 "Renewals", "Notice Given", "Evictions", "Leased by Arkie", "Leased by Tommy"]
+    pm_rows = ["Showings", "Applications", "New Leases", "Renewals", "Notice Given", "Evictions"]
+    reporters = _expected(M, "rentals", form_rows, ["Arkie", "Lara Harris", "Tommy Sigman"])
+    pm_reporters = _expected(M, "rentals", pm_rows, ["Lara Harris"])
+    rep_all = ACC.reporting(M.get("rentals_submits") or {}, reporters, ao)
+    rep_pm = ACC.reporting(M.get("rentals_submits") or {}, pm_reporters, ao)
+    attention = _attention_missed("Rentals", rep_all)
     snap_sub = "Buildium via the nightly sync" + ((" · snapshot dated %s" % o["snap_date"]) if o.get("snap_date") else "")
     vac_txt = ("%d vacant" % o["vacant_total"]) if o.get("vacant_total") is not None else ""
     prop_rows = [[p["name"], str(p["units"]), str(p["vac"]),
@@ -546,7 +652,7 @@ def _rentals(M, ao):
              "widths": [396, 108], "left_cols": 1,
              "rows": [[p, str(n)] for p, n in sorted(M.get("rentals_set_by_prop", {}).items(), key=lambda kv: (kv[0].startswith("("), -kv[1], kv[0]))]
                      + [[A("Total", "ink", True), A(str(sum(M.get("rentals_set_by_prop", {}).values())), "ink", True)]]},
-            {"kind": "section", "title": "PROPERTY MANAGEMENT ACTIVITY", "sub": "Lara's daily form until the Buildium lease-event feed lands · Status = on/off the goal's pace"},
+            {"kind": "section", "title": "PROPERTY MANAGEMENT ACTIVITY", "sub": "reporters: %s · daily form until the Buildium lease-event feed lands · Status = on/off the goal's pace" % ACC.names(pm_reporters)},
             {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
              "widths": [148, 66, 50, 44, 44, 44, 52, 56], "left_cols": 2, "rows": [
                 arow("Showings", 2, "day", "Lara", act["Showings"]),
@@ -555,11 +661,12 @@ def _rentals(M, ao):
                 arow("Renewals", 1, "day", "Lara", act["Renewals"]),
                 arow("Notice Given", 0, "day", "Lara", act["Notice Given"], direction="down"),
                 arow("Evictions", 0, "mo", "Lara", act["Evictions"], direction="down")]},
+            _report_block("Rentals property-management form", rep_pm),
         ]
     else:
         # pre-FUB layout (the brief Wyatt gets until FUB_GO_LIVE_AS_OF): every row from the daily forms
         blocks += [
-        {"kind": "section", "title": "LEASING ACTIVITY", "sub": "hand-logged, lags 2-3 days · Status = on/off the goal's pace"},
+        {"kind": "section", "title": "LEASING ACTIVITY", "sub": "reporters: %s · hand-logged daily forms · Status = on/off the goal's pace" % ACC.names(reporters)},
         {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
          "widths": [148, 66, 50, 44, 44, 44, 52, 56], "left_cols": 2, "rows": [
             arow("Leads", 5, "day", "Arkie/Tommy", act["Leads"]),
@@ -573,11 +680,12 @@ def _rentals(M, ao):
             arow("Evictions", 0, "mo", "Lara", act["Evictions"], direction="down"),
             arow("Leased by Arkie", 1, "week", "Arkie", act["Leased by Arkie"]),
             arow("Leased by Tommy", 1, "week", "Tommy", act["Leased by Tommy"])]},
+        _report_block("Rentals daily forms", rep_all),
         ]
     foot = ("Sources: Buildium via nightly sync + Follow Up Boss (leads, calls, rental stages) + Lara (property manager) daily form" if rf
             else "Sources: Buildium via nightly sync + Arkie, Tommy and Lara (property manager) daily forms")
-    return {"title": "Rentals",
-            "foot": foot,
+    return {"title": "Rentals", "attention": attention,
+            "foot": foot + " · owners from Scorecard Mapping",
             "health": ("Occupancy is %s%% across %d units. Leasing activity pace is shown per KPI below."
                        % (_pct(o["occ"]), o["units"] or 0)),
             "blocks": blocks}
@@ -684,8 +792,20 @@ def _fundamentals(M, ao):
         g, cad, _ = _rg(M, "fundamentals", label, fb_goal, fb_cad)
         mtd = w["MTD"]
         status = st(mtd, g, cad, ao, direction) if (g not in (None, "") and "MTD" not in dead) else A("--", "light")
-        return [label, "Paige", _goaltxt(g, cad), cell(w, "Yest", dead), cell(w, "WTD", dead),
+        return [label, _own(M, "fundamentals", label, "Paige"), _goaltxt(g, cad), cell(w, "Yest", dead), cell(w, "WTD", dead),
                 cell(w, "MTD", dead), cell(w, "LastMo", dead), status]
+    # Paige's M-F form has one submitter; expected = registry owners of its three rows.
+    reporters = _expected(M, "fundamentals", ["New Leads", "Conversations", "Tours"], ["Paige Comeaux"])
+    rep = ACC.reporting({ACC.first(reporters[0]): set(p.get("form_dates") or [])}, reporters, ao)
+    attention = _attention_missed("Fundamentals", rep)
+    wl_owner = ACC.names(_owners(M, "fundamentals", "Waitlist"), "Paige")
+    wl_exits = o.get("waitlist_converted", 0) + o.get("waitlist_cold", 0)
+    wl_since = o.get("waitlist_since") or ""
+    wl_since_txt = ("%d/%d" % (int(wl_since[5:7]), int(wl_since[8:10]))) if len(wl_since) >= 10 else "load"
+    if wl_exits == 0:
+        attention.append(["Fundamentals: waitlist has no exits since %s · %s" % (wl_since_txt, wl_owner),
+                          "%d families read as active and none has been marked Converted or Cold, so the number can only grow. "
+                          "Flip Status when a family enrolls or stops answering and the count becomes real." % o["waitlist_active"]])
     enr_goal = _gnum(M, "fundamentals", "Kids Enrolled")
     open_goal = _gnum(M, "fundamentals", "Openings")
     wl_goal = _gnum(M, "fundamentals", "Waitlist")
@@ -714,7 +834,9 @@ def _fundamentals(M, ao):
             ["Classroom Seats Filled", "%s%%" % (("%.0f" % pct) if pct is not None else "-"),
              "%d of %d seats" % (o["class_enrolled"], o["class_cap"]), ""],
             ["Booked Weekly Tuition", money(o["weekly_rev"]), "live from the roster, rate less discounts", "green"],
-            ["Active Waitlist", str(o["waitlist_active"]), ("goal %d" % wl_goal if wl_goal else "families"), "green"]]},
+            ["Active Waitlist", str(o["waitlist_active"]),
+             "%d converted · %d cold since %s · %s" % (o.get("waitlist_converted", 0), o.get("waitlist_cold", 0), wl_since_txt, ACC.first(wl_owner)),
+             "amber" if wl_exits == 0 else "green"]]},
         {"kind": "cards", "items": [
             ["Open Seats", str(o["open_seats"]), ("goal %d" % open_goal if open_goal else "across all rooms"), ""],
             ["Before/After Care", "%d of %d" % (o["purple_enrolled"], o["purple_cap"]), "Purple Room", ""],
@@ -738,6 +860,7 @@ def _fundamentals(M, ao):
             prow("Tours", None, "day", p["tours"], dead=form_dead),
             prow("New Enrollments", 2, "day", p["new_enroll"])],
          "note": "Windows before the form went live show '-'. New Enrollments is the same count as the activity table above, shown here as the bottom of the funnel. Goals for the first three rows are being set in the registry; pace status appears once they are."},
+        _report_block("Fundamentals daily form", rep),
         {"kind": "section", "title": "ROOMS: CAPACITY, FILLED, OPEN, DEMAND", "keep": 320,
          "sub": "%d classroom seats open · %d families targeting a specific room, %d more in the birth-year pool" % (
              sum(r["open"] for r in rooms if r["name"] != "Purple Room"), sum(r["waitlist"] for r in rooms), unassigned)},
@@ -750,7 +873,7 @@ def _fundamentals(M, ao):
         blocks += [
             {"kind": "section", "title": "ORGANIC SOCIAL", "sub": "Fundamentals Early Learning Center Facebook page · live via Windsor · no paid ads run for this division"},
             {"kind": "table", "cols": ["Metric", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo"],
-             "widths": [148, 64, 56, 42, 42, 44, 108], "left_cols": 2, "rows": _orgrows(org, _orggoals(M, "fundamentals")),
+             "widths": [148, 64, 56, 42, 42, 44, 108], "left_cols": 2, "rows": _orgrows(org, _orggoals(M, "fundamentals"), owner=_own(M, "fundamentals", "Organic Posts Published", "Roxanne")),
              "note": "Page followers now %s. Posts counted by publish date; impressions and engagements are page-level daily totals." % num(org["fans_now"]) if org.get("fans_now") is not None else None},
         ]
     flag_items = []
@@ -758,18 +881,18 @@ def _fundamentals(M, ao):
         flag_items.append(["%d departed children carry no last day" % fl["departed_no_end"],
                            "Fall transition departures without an End Date. Until Paige dates them, churn for July and August reads low. The base flags each one for her."])
     if fl["inactive_no_end"]:
-        flag_items.append(["%d inactive staff carry no end date" % fl["inactive_no_end"],
+        flag_items.append(["%d inactive staff carry no end date · %s" % (fl["inactive_no_end"], wl_owner),
                            "Marked Inactive without a last day, so Terminations reads low until Paige dates them."])
     q = fl["children"] + fl["staff"] + fl["waitlist"]
     if q:
-        flag_items.append(["Data backfill queue: %d records" % q,
+        flag_items.append(["Data backfill queue: %d records · %s" % (q, wl_owner),
                            "%d children, %d staff, %d waitlist rows flagged in the base for missing dates, contacts or certs. Paige works the queue from the Data Flags view." % (fl["children"], fl["staff"], fl["waitlist"])])
     if flag_items:
         blocks += [{"kind": "section", "title": "DATA FLAGS", "sub": "known gaps, named rather than hidden"},
                    {"kind": "flags", "items": flag_items}]
     ann = o["annualized"]
-    return {"title": "Fundamentals of Early Learning Center",
-            "foot": "Sources: Fundamentals ELC operational base (rooms, children, staff, waitlist; live derivation) + Paige's daily form%s"
+    return {"title": "Fundamentals of Early Learning Center", "attention": attention,
+            "foot": "Sources: Fundamentals ELC operational base (rooms, children, staff, waitlist; live derivation) + Paige's daily form%s · owners from Scorecard Mapping"
                     % (" + Facebook Organic via Windsor" if org else ""),
             "health": ("The school has %d children enrolled, %d of %d classroom seats (%s%%) plus %d in before/after care, "
                        "booking %s a week in tuition (about %s a year). %d families are on the active waitlist against %d open seats, "

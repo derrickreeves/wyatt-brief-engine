@@ -19,6 +19,16 @@ def render(p):
     if cov.get("health"):
         out.append(f"**Portfolio health:** {cov['health']}")
         out.append("")
+    att = cov.get("attention") or []
+    out.append("**Needs attention** (every gap carries the name of the person who enters that data)")
+    out.append("")
+    if att:
+        for it in att:
+            it = list(it) + ["", ""]
+            out.append(f"- **{_cell(it[0])}** {_cell(it[1])}".rstrip())
+    else:
+        out.append("- Nothing outstanding: every form was filed and no required field is blank.")
+    out.append("")
     inc = cov.get("included") or []
     if inc:
         out.append("**Divisions in this brief**")
@@ -70,6 +80,16 @@ def render(p):
                 out.append("")
             elif k == "prose":
                 out.append(_cell(b.get("text", "")))
+                out.append("")
+            elif k == "report":
+                if b.get("weekend"):
+                    out.append(f"_{b.get('what', '')}: weekend, no filing expected_")
+                elif b.get("missed"):
+                    out.append(f"**Did not report yesterday:** {', '.join(b['missed'])}")
+                else:
+                    out.append("**Everyone reported yesterday**")
+                if b.get("tally"):
+                    out.append(f"_Filed, last 5 business days ({b.get('window', '')}): {b['tally']}_")
                 out.append("")
             elif k == "flags":
                 out.append("**Data flags**")

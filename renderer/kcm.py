@@ -275,6 +275,12 @@ def kcm_flips(flips, as_of):
            selling=sum(1 for r in active if r["phase"]=="Selling"),
            proj=round(sum(r["npp"] for r in active if r["npp"] is not None)),
            proj_n=sum(1 for r in active if r["npp"] is not None),
+           # profit in motion = actual profit where a contract/sale price is entered, projected otherwise
+           # (Specs convention; Wyatt 2026-10-15)
+           motion=round(sum((r["nap"] if (r["sale"] is not None and r["nap"] is not None) else r["npp"])
+                            for r in active if (r["nap"] is not None if r["sale"] is not None else r["npp"] is not None))),
+           motion_n=sum(1 for r in active if (r["nap"] is not None if r["sale"] is not None else r["npp"] is not None)),
+           under_contract=sum(1 for r in active if r["sale"] is not None),
            sold_ytd=len(sold_ytd),
            realized=round(sum(r["nap"] for r in sold_ytd if r["nap"] is not None)),
            realized_n=sum(1 for r in sold_ytd if r["nap"] is not None),

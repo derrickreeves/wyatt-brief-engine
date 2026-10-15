@@ -45,6 +45,7 @@ from datetime import date
 import brief_engine as E
 import kcm as K
 import build_payload_engine as BP
+import accountability as ACC
 
 # --------------------------------------------------------------------------
 # field IDs
@@ -53,6 +54,9 @@ import build_payload_engine as BP
 F_DATE="fldQBhqe75egflhy0"; F_CONV="fldCs0I6edbUun2GF"; F_LEAD="fldBP0kmCfokC2cmx"
 F_SHOWL="fldExlKs1MzaUh23Z"; F_BUYS="fldcSWGeEgYwqpwsh"; F_PREAPP="fldKh0PnSoCKvWew1"
 F_PRESOLD="fldhA9GXiacavYgJl"
+# Submitter (single select: Danielle / Laurie / Tommy / Gabby) — who filed the row. Drives the
+# "did not report" line (added 2026-10-15); expected names come from the registry owners.
+F_WHO="fldcjD7ldoCdNid66"
 # Ascend overview
 AO_STAT="flduzAMWSYrRs7byH"; AO_REV="fldXsiSmPc0h5xrSX"; AO_UPD="fldXCgV7EEt5nCXSU"
 # Member list (Randall ask 9/17, Derrick spec 2026-09-21): Contact name. The ascend_overview pull MUST include this field
@@ -82,6 +86,7 @@ RO_PROPS=[("Corbin","fldiN54TKGOoep3q8","fldezWbRUjmV93t9i","fldhcbc69nCKhmmwf")
           ("Greenwell Springs","fldihKkZn05tblSri","fldPZAGN1Fj8rP2X3","fldp6gDDGYJHrzw1O")]
 # Rentals KPI
 RK_DATE="fld4kOVsaSICYJDPu"
+RK_WHO="fldeLl1tETwhSBWxM"   # Entry Type = whose form the row came from (Arkie / Lara Harris / Tommy Sigman)
 RK={"Leads":"fld8zL1I5JOs4T66T","Conversations":"fld5StD4hkWOAYwUH","Appointments Set":"fldxWD40JUuJNkNok",
     "Showings":"fldsvYDsWCA0v4cGV","Applications":"fldObKkY9qXedpnei","New Leases":"fldFc1iXPBEMaOqwh",
     "Renewals":"fldhPlwn358h1yu8X","Notice Given":"fld9VgTpGZsYeMiZY","Evictions":"fldy6lixAYCLZhDmR",
@@ -137,7 +142,7 @@ FC_ROOM="fld1y4q8MwJxMzMix"; FC_TUITION="fldm5yKBqYK8b67vw"; FC_FLAGS="fldw6Pkbw
 FS_NAME="fldVKmmJ5SBcZPrDQ"; FS_STAT="fldFslXJSvaN8WYbn"; FS_HIRE="fldMvfNeMwyyHFBkV"; FS_END="fldEcZRVfsXw3n0Z4"
 FS_CPR="fldq5bgrEoZUMND5r"; FS_FLAGS="fldGSZb9BVPFC10gL"
 # Waitlist  (blank Status = Active by design; Active? formula = 1 counts toward depth)
-FW_ACTIVE="fldpuGXYRkoYQ1U5T"; FW_TARGET="fldSYVKpIugXuDtWL"; FW_YEAR="fldo34w97dLU2i52X"; FW_FLAGS="fldfKoS3xfGgrXAHL"
+FW_STATUS="fldBUCxpxl00vnHYL"; FW_ACTIVE="fldpuGXYRkoYQ1U5T"; FW_TARGET="fldSYVKpIugXuDtWL"; FW_YEAR="fldo34w97dLU2i52X"; FW_FLAGS="fldfKoS3xfGgrXAHL"
 # Fundamentals KPI's form table (app8A3ZyxQaghkq1m / tbluQyQGQne6QbvH6) — Paige's trimmed M-F form
 FK_DATE="fldfQzNsMWuyldNFG"; FK_LEADS="fld9dslBh58J2SQQR"; FK_CONV="fld1TRabPSK3Sl7hg"; FK_TOURS="fldmETo2Etu15zr6J"
 # Waitlist rows were bulk-imported on 2026-08-27 (one createdTime spike); created-in-window
@@ -165,6 +170,7 @@ REG_FILES={"kcm":"registry_kcm.json","ascend":"registry_ascend.json",
            "cowork":"registry_cowork.json","rentals":"registry_rentals.json",
            "fundamentals":"registry_fundamentals.json","team":"registry_team.json"}
 REG_KPI="fldJneEqHnbmlmMRb"; REG_GOAL="fldLPpv1oY10sn7gE"; REG_CAD="fldgChMlnK0rqOqZi"; REG_STATUS="fldwPGQRS265R8LgF"
+REG_OWNER=ACC.OWNER_FIELD   # Owner Name lookup — the registry is the source of truth for owners too (2026-10-15)
 CAD_MAP={"Daily":"day","Weekly":"week","Monthly":"mo","Overview":"overview"}
 
 def _load(pulls, name):
@@ -196,6 +202,7 @@ def kcm_M(pulls, as_of):
         "kcm_state":K.kcm_state(specs), "kcm_events":K.kcm_events(specs, as_of),
         "kcm_forms":{"conv":w(F_CONV),"lead":w(F_LEAD),
                      "show":_show(fc,as_of),"preapp":w(F_PREAPP),"presold":w(F_PRESOLD)},
+        "kcm_submits":ACC.submits_from(fc, F_DATE, F_WHO),
         "kcm_listings":(lst,lt),"kcm_uc":(uc,ut),"kcm_coming":(cm,ct),
         "kcm_pipeline":K.kcm_pipeline(specs),
         "kcm_lenders":K.kcm_lenders(specs, LENDER_MAP),
@@ -338,7 +345,7 @@ def rentals_M(pulls, as_of):
     kpi=_recs(_load(pulls,"rentals_kpi.json")); kc=_cells(kpi)
     recs=[{"cellValuesByFieldId":c} for c in kc]
     act={name:E.window_sum(recs, RK_DATE, fid, as_of) for name,fid in RK.items()}
-    return {"rentals_ov":o,"rentals_act":act}
+    return {"rentals_ov":o,"rentals_act":act,"rentals_submits":ACC.submits_from(kc, RK_DATE, RK_WHO)}
 
 def _has_user(cell, users):
     s = (cell or "")
@@ -540,6 +547,12 @@ def fundamentals_M(pulls, as_of):
         "waitlist_active": sum(1 for r in wl if (r.get("cellValuesByFieldId",{}).get(FW_ACTIVE) or 0)==1),
         "waitlist_unassigned": sum(1 for r in wl if (r.get("cellValuesByFieldId",{}).get(FW_ACTIVE) or 0)==1
                                    and not r.get("cellValuesByFieldId",{}).get(FW_TARGET)),
+        # Is the waitlist being kept current? Rows leave it by Status (Converted = enrolled, Cold = stopped
+        # answering, Bad Number). Zero exits month after month means the number only ever grows (2026-10-15).
+        "waitlist_converted": sum(1 for r in wl if _nm((r.get("cellValuesByFieldId") or {}).get(FW_STATUS))=="Converted"),
+        "waitlist_cold": sum(1 for r in wl if _nm((r.get("cellValuesByFieldId") or {}).get(FW_STATUS))=="Cold"),
+        "waitlist_bad": sum(1 for r in wl if _nm((r.get("cellValuesByFieldId") or {}).get(FW_STATUS))=="Bad Number"),
+        "waitlist_since": min([(r.get("createdTime") or "")[:10] for r in wl if r.get("createdTime")] or [""]),
     }
     ov["annualized"]=ov["weekly_rev"]*52
     # waitlist demand by birth-year group (Paige's organizing axis), active rows only
@@ -573,6 +586,7 @@ def fundamentals_M(pulls, as_of):
     pipe["_waitlist_dead"]=[lab for lab,(a,b) in W.items() if a.isoformat()<FELC_WAITLIST_LIVE]
     pipe["_form_dead"]=[lab for lab,(a,b) in W.items() if b.isoformat()<FELC_FORM_LIVE]
     pipe["form_rows"]=len(fc)
+    pipe["form_dates"]={str(c.get(FK_DATE))[:10] for c in fc if c.get(FK_DATE)}
     # --- data flags = Paige's backfill queue (count only; the base holds the detail)
     flags={"children":sum(1 for c in kc if c.get(FC_FLAGS)),
            "staff":sum(1 for c in sc if c.get(FS_FLAGS)),
@@ -656,7 +670,8 @@ def registry_M(pulls):
                 continue
             d[str(nm).strip().lower()]={"goal":c.get(REG_GOAL),
                                         "cad":CAD_MAP.get(_nm(c.get(REG_CAD)), "mo"),
-                                        "status":_nm(c.get(REG_STATUS))}
+                                        "status":_nm(c.get(REG_STATUS)),
+                                        "owners":ACC.norm_owners(c.get(REG_OWNER))}
         goals[div]=d
     return {"registry_goals":goals}
 

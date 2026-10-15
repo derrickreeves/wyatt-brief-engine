@@ -227,13 +227,15 @@ class Doc:
 
     def flags(self, items):
         c = self.c
-        for title, body in items:
+        for item in items:
+            title, body = item[0], item[1]
+            tcol = color(item[2]) if len(item) > 2 and item[2] else INK
             body_lines = simpleSplit(body, "Helvetica", 8, R - L - 10)
             self.need(11 + len(body_lines) * 10 + 8)
-            c.setFillColor(INK)
+            c.setFillColor(tcol)
             c.circle(L + 2.5, self.y + 3, 1.6, stroke=0, fill=1)
             c.setFont("Helvetica-Bold", 8.5)
-            c.setFillColor(INK)
+            c.setFillColor(tcol)
             c.drawString(L + 10, self.y, title)
             self.y -= 11
             c.setFont("Helvetica", 8)
@@ -242,6 +244,32 @@ class Doc:
                 c.drawString(L + 10, self.y, ln)
                 self.y -= 10
             self.y -= 8
+
+    def report(self, what, missed, tally, weekend=False, window=""):
+        """Who did not file yesterday (amber, bold) and the last-5-business-days tally (muted)."""
+        c = self.c
+        self.y -= 2
+        if weekend:
+            head, col = "%s: weekend, no filing expected" % what, MUTED
+        elif missed:
+            head, col = "Did not report yesterday: %s" % ", ".join(missed), color("amber")
+        else:
+            head, col = "Everyone reported yesterday", color("green")
+        lines = simpleSplit(head, "Helvetica-Bold", 8.5, R - L)
+        tl = simpleSplit(("Filed, last 5 business days (%s): " % window if window else "Filed, last 5 business days: ") + tally,
+                         "Helvetica", 7, R - L)
+        self.need(len(lines) * 11 + len(tl) * 9 + 8)
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColor(col)
+        for ln in lines:
+            c.drawString(L, self.y, ln)
+            self.y -= 11
+        c.setFont("Helvetica", 7)
+        c.setFillColor(MUTED)
+        for ln in tl:
+            c.drawString(L, self.y, ln)
+            self.y -= 9
+        self.y -= 6
 
     def prose(self, text, size=8.5, bold=False):
         c = self.c
@@ -265,6 +293,17 @@ class Doc:
         self.title_block(cov.get("title", "Wyatt Portfolio Daily Brief"))
         if cov.get("health"):
             self.health(cov["health"])
+        attention = cov.get("attention") or []
+        if attention:
+            self.section("NEEDS ATTENTION", "every gap carries the name of the person who enters that data (owners from Scorecard Mapping)")
+            self.flags([[a[0], a[1], "amber"] for a in attention])
+        else:
+            self.section("NEEDS ATTENTION", "every gap carries the name of the person who enters that data")
+            c.setFont("Helvetica", 8.5)
+            c.setFillColor(color("green"))
+            self.need(14)
+            c.drawString(L, self.y, "Nothing outstanding: every form was filed and no required field is blank.")
+            self.y -= 14
         included = cov.get("included") or []
         if included:
             self.section("IN THIS BRIEF", "One card per division, in the locked portfolio order  ·  print-ready")
@@ -316,6 +355,8 @@ class Doc:
                            b.get("note"), int(b.get("left_cols", 2)))
             elif kind == "flags":
                 self.flags(b.get("items", []))
+            elif kind == "report":
+                self.report(b.get("what", ""), b.get("missed") or [], b.get("tally", ""), b.get("weekend", False), b.get("window", ""))
             elif kind == "prose":
                 self.prose(b.get("text", ""), float(b.get("size", 8.5)), bool(b.get("bold", False)))
             else:

@@ -365,6 +365,11 @@ def _kcm(M, ao):
             if r["phase"] == "Sold":
                 continue
             miss = [n for n, v in (("Purchase Price", r["purch"]), ("Rehab Budget", r["rehab"]), ("Projected List", r["proj_list"])) if v is None]
+            if not r["lender"] or r["lender"] == "-":  # Lender column added 2026-10-21; a blank link is a named gap, not an error
+                flag_items.append(["%s: private money lender not linked · %s" % (r["addr"], flips_owner),
+                                   "Blank in the Flips table, so the Lender column reads \"-\". Link the lender on the flip's record."])
+                for o in (_owners(M, "kcm", "Active Flips") or ["Randall Landry"]):
+                    attention.append(_att(o, "Update the Flips table in Airtable", "%s needs its private money lender linked" % r["addr"]))
             if miss:
                 flag_items.append(["%s: %s not entered · %s" % (r["addr"], ", ".join(miss).lower(), flips_owner),
                                    "Blank in the Flips table, so the row reads MISSING and this flip is left out of the profit total. Nothing is assumed as $0."])
@@ -430,10 +435,13 @@ def _flips_blocks(M, ao):
         return pl(r["npp"])
     def dash(v):
         return money(v) if v is not None else "-"
-    rows = [[r["addr"], r["stage"], str(r["days"]) if r["days"] is not None else "-",
+    # Lender column (added 2026-10-21, Randall's ask): the Private Money Lender linked on the flip;
+    # "-" when none is linked (and the gap is named in Data Flags).
+    rows = [[r["addr"], r["stage"], r["lender"] if r["lender"] and r["lender"] != "-" else A("-", "amber"),
+             str(r["days"]) if r["days"] is not None else "-",
              mcell(r["purch"]), mcell(r["rehab"]), mcell(r["proj_list"]), dash(r["sale"]), profit_cell(r)] for r in active]
     total = s["motion"]
-    rows.append([A("Total", "ink", True), A("%d active flips" % s["active"], "ink", True), "", "", "", "", "",
+    rows.append([A("Total", "ink", True), A("%d active flips" % s["active"], "ink", True), "", "", "", "", "", "",
                  A(money(total), "ink", True)])
     blocks = [
         {"kind": "section", "title": "FLIPS", "sub": "%d in motion · %s profit in motion%s · live from the KCM Flips table · data owner %s"
@@ -448,8 +456,8 @@ def _flips_blocks(M, ao):
              (money(s["realized"]) + " realized") if s["realized_n"] == s["sold_ytd"] else "%d of %d report actual profit" % (s["realized_n"], s["sold_ytd"]),
              "green" if (s["sold_ytd"] and s["realized_n"] == s["sold_ytd"]) else ("amber" if s["sold_ytd"] else "")],
             ["Avg Days Held (Active)", str(s["avg_days"]) if s["avg_days"] is not None else "-", "acquisition to today", ""]]},
-        {"kind": "table", "cols": ["Flip", "Stage", "Days", "Purchase", "Rehab Budget", "Proj. List", "Contract", "Profit"],
-         "widths": [116, 92, 34, 52, 56, 52, 50, 52], "left_cols": 2, "rows": rows,
+        {"kind": "table", "cols": ["Flip", "Stage", "Lender", "Days", "Purchase", "Rehab Budget", "Proj. List", "Contract", "Profit"],
+         "widths": [96, 70, 68, 30, 48, 52, 48, 46, 46], "left_cols": 3, "rows": rows,
          "note": "Profit is projected (list price less rehab budget, purchase, closing, financing and holding costs) until a contract price is entered; "
                  "then * = what the flip actually makes or loses at that price, the same way Specs read once a home is under contract. "
                  "MISSING = not yet entered in the Flips table, which %s keeps. See Data Flags." % flips_owner},

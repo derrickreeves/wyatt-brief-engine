@@ -136,7 +136,7 @@ SHARED_EVENTS={"Breakfast","Investor Meetup","Pickleball"}
 FR_NAME="flde5oMnvs1vxsENI"; FR_AGE="fldbZ1txWbx0NubEm"; FR_CAP="fldo97Po7gX0klFnR"; FR_RATE="fldrg6d0FzPbSpXTR"
 FR_STAFF="fldKsA9uluDtuKycn"; FR_ENR="fldOow0vNwUpIDHqf"; FR_OPEN="fldWvVHcqSUDQV6h0"; FR_WL="fldGEHqG8ihgsQJZR"; FR_REV="fldZOfdmPzlj5tOVn"
 # Children  (Status choices: Enrolled / Not Returning / Withdrawn — schema-verified 2026-09-02)
-FC_NAME="fldew0bEEHrm91l89"; FC_STAT="fldqcBEHKyjG7LXqB"; FC_START="fldLju3qnczVqAMhZ"; FC_END="fldqT3RWUjganrrmh"
+FC_NAME="fldew0bEEHrm91l89"; FC_STAT="fldqcBEHKyjG7LXqB"; FC_START="fldLju3qnczVqAMhZ"; FC_ENROLL="fldAWLtdAwXJ2jxGS"; FC_END="fldqT3RWUjganrrmh"  # FC_ENROLL = Effective Enrollment Date (Enrollment Date, else Start Date); added 2026-10-21
 FC_ROOM="fld1y4q8MwJxMzMix"; FC_TUITION="fldm5yKBqYK8b67vw"; FC_FLAGS="fldw6Pkbw5iVbRRKL"
 # Staff  (Status: Active / Inactive)
 FS_NAME="fldVKmmJ5SBcZPrDQ"; FS_STAT="fldFslXJSvaN8WYbn"; FS_HIRE="fldMvfNeMwyyHFBkV"; FS_END="fldEcZRVfsXw3n0Z4"
@@ -568,8 +568,9 @@ def fundamentals_M(pulls, as_of):
         return [{"cellValuesByFieldId":c} for c in recs]
     kr=flip(kc); sr=flip(sc); fr=flip(fc)
     pipe={
-      # a start date in the window is an enrollment, whatever the child's status today
-      "new_enroll": E.window_count(kr, FC_START, as_of),
+      # an Effective Enrollment Date in the window is an enrollment, whatever the child's status today
+      # (Enrollment Date = the day the family signed; falls back to Start Date for kids entered before 2026-10-21)
+      "new_enroll": E.window_count(kr, FC_ENROLL, as_of),
       # churn = last day in the window (End Date is stamped by the status-flip automation)
       "churn": E.window_count(kr, FC_END, as_of, lambda c:_nm(c.get(FC_STAT)) in ("Withdrawn","Not Returning")),
       "new_hires": E.window_count(sr, FS_HIRE, as_of),

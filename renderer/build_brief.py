@@ -177,6 +177,9 @@ KS_PROPS=["The Willows","The Grove","The Bluffs"]
 # Total units per property (static; Derrick 2026-10-29: hard-code, the complexes do not add units). None = not yet
 # known, occupancy renders "-" for that property and for the total. Fill in from Randall and push.
 KS_UNITS={"The Willows":None,"The Grove":None,"The Bluffs":None}
+# Which reporter owns which property's form (Derrick 2026-10-29: two people, one has two properties). Blank = every
+# registry owner is asked when that property is missing. Fill in once Randall confirms.
+KS_OWNERS={"The Willows":None,"The Grove":None,"The Bluffs":None}
 # Room display order = age progression, the way Paige reads her roster.
 FELC_ROOM_ORDER=["Pink Room","Lime Room","Orange Room","Green Room","Brown Room","Red Room","Blue Room","Yellow Room","Purple Room"]
 FELC_AFTERCARE="Purple Room"
@@ -753,6 +756,14 @@ def build_M(pulls, as_of):
     M.update(cowork_M(pulls, as_of))
     M.update(rentals_M(pulls, as_of))
     M.update(keystone_M(pulls, as_of))   # Rentals (MS); no-op when the pull is absent
+    # Did ANY human daily form get an entry for as_of? Drives the holiday rule for the Slack nudge (2026-10-29).
+    y=as_of.isoformat(); filed=False
+    for sub in (M.get("kcm_submits") or {}, M.get("rentals_submits") or {}):
+        if any(y in ds for ds in sub.values()): filed=True
+    if any(y in p["dates"] for p in (M.get("ks_props") or [])): filed=True
+    fc=_cells(_recs(_load(pulls,"felc_kpi.json")))
+    if any(str(c.get(FK_DATE))[:10]==y for c in fc): filed=True
+    M["any_filed_yesterday"]=filed
     if as_of.isoformat() >= FUB_GO_LIVE_AS_OF or os.environ.get("FUB_FORCE") == "1":
         M.update(fub_M(pulls, as_of))
     # FELC_FORCE=1 in the environment renders the card regardless of the gate (review builds only).

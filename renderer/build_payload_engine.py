@@ -122,9 +122,12 @@ def _report_block(what, rep):
     return {"kind": "report", "what": what, "missed": [ACC.first(x) for x in rep["missed_yest"]],
             "weekend": rep["weekend"], "tally": ACC.tally_text(rep), "window": rep["window"]}
 
-def _att(who, where, ask):
-    """One ask for one person. The cover groups these by person: 'who do I need to talk to today, and why'."""
-    return {"who": who, "where": where, "ask": ask}
+def _att(who, where, ask, kind="data", division=None, filed=None, n=None):
+    """One ask for one person. The cover groups these by person: 'who do I need to talk to today, and why'.
+    kind: "form" = a missed daily-form entry (one per person per day; the Slack nudge sends it once, the next
+    morning); "data" = a record that needs fixing (persists until fixed; the nudge re-sends at most every 5
+    business days). filed/n = that person's last-5-business-days tally, for the streak wording (2026-10-29)."""
+    return {"who": who, "where": where, "ask": ask, "kind": kind, "division": division, "filed": filed, "n": n}
 
 def _attention_missed(div_name, rep, form_name, ao=None):
     """One entry per person who did not file yesterday, in plain words."""
@@ -144,7 +147,7 @@ def _attention_missed(div_name, rep, form_name, ao=None):
             ask = "no entry for %s (last filed %s)" % (yd, ACC._md(t["last"]))
         else:
             ask = "no entry for %s" % yd
-        out.append(_att(t["name"], form_name, ask))
+        out.append(_att(t["name"], form_name, ask, kind="form", division=div_name, filed=t["filed"], n=t["n"]))
     return out
 
 def _group_attention(items):
@@ -195,6 +198,12 @@ def build(M, as_of):
         attention += d.pop("attention", []) or []
     P["cover"] = _cover(M)
     P["cover"]["attention"] = _group_attention(attention)
+    # NUDGE (2026-10-29): the same list, structured, for the n8n Slack reminder. One source of truth, so a DM can
+    # never disagree with the PDF. holiday = nobody in the portfolio filed any daily form for as_of (a weekday with
+    # zero submissions anywhere is treated as a company holiday and no reminders go out).
+    P["nudge"] = {"as_of": as_of.isoformat(), "weekend": as_of.weekday() >= 5,
+                  "holiday": (as_of.weekday() < 5) and not M.get("any_filed_yesterday", True),
+                  "items": attention}
     return P
 
 def _wk(as_of):
@@ -774,8 +783,19 @@ def _keystone(M, ao):
                window="%s-%s" % (ACC._md(days[-1].isoformat()), ACC._md(days[0].isoformat())))
     attention = []
     if missed and not weekend:
-        for o in owners:
-            attention.append(_att(o, _KS_FORM, "no entry for %s on %s" % (", ".join(missed), ACC._md(ao.isoformat()))))
+        # KS_OWNERS (build_brief) maps property -> owner name; a blank entry falls back to every registry owner.
+        import build_brief as _BB
+        by_owner = {}
+        for prop in missed:
+            targets = [_BB.KS_OWNERS.get(prop)] if _BB.KS_OWNERS.get(prop) else owners
+            for o in targets:
+                by_owner.setdefault(o, []).append(prop)
+        for o, props_missed in by_owner.items():
+            # tally for this owner = worst (fewest filed) of their properties over the last 5 business days
+            mine = [t for t in tally if (_BB.KS_OWNERS.get(t["name"]) in (None, o))]
+            filed = min((t["filed"] for t in mine), default=0)
+            attention.append(_att(o, _KS_FORM, "no entry for %s on %s" % (", ".join(props_missed), ACC._md(ao.isoformat())),
+                                  kind="form", division="Rentals (MS)", filed=filed, n=5))
     stale = [p for p in props if p["stale"]]
     snap_sub = "hand-filled daily form, latest entry per property" + ((" · stale: %s" % ", ".join("%s (%s)" % (p["name"], md(p["snap_date"])) for p in stale)) if stale else "")
     blocks = [

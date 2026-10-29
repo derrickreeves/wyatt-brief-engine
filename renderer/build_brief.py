@@ -39,6 +39,10 @@ Canonical pull filenames (saved by the shift):
   fub_rental.json         FUB Rental Leads (tblcmBjaxkKdXcQIb) — all rows
   fub_leads.json          FUB New Leads (tblXY9qzt3QZRYX2z) — all rows (rolling 60 days)
   fub_users.json          FUB Users (tbl21PFnad40vLOqJ) — all rows (agent roster: name, role, status)
+  keystone_kpi.json       Keystone KPI's (app8A3ZyxQaghkq1m / tbl5KthJhdMuecUMt) — the three Keystone of
+                          Mississippi properties' daily form, prior-month-start onward. Added 2026-10-29.
+                          BRIDGE SOURCE: hand-filled until Knock CRM / OneSite feed the same fields.
+  registry_keystone.json  Scorecard Mapping rows for Division link recwrct9YshWCkmQc (Rentals (MS))
 """
 import json, os, sys, subprocess
 from datetime import date
@@ -158,6 +162,21 @@ FELC_GO_LIVE_AS_OF="2026-09-03"
 # gives the go (built 2026-09-21, held so the 9/22 send is untouched ahead of his 8 AM with Wyatt). Set the date
 # to the first as-of that should carry it, or FUB_FORCE=1 in the environment for review renders only.
 FUB_GO_LIVE_AS_OF="2099-01-01"
+# --- Keystone of Mississippi (Rentals (MS)) daily form table (app8A3ZyxQaghkq1m / tbl5KthJhdMuecUMt). Added 2026-10-29.
+# One row per property per day, hand-filled by the two on-site reporters (Tracie Moore, Jasmine Sanders) until
+# Knock CRM / OneSite write the same fields from source. Three SNAPSHOT fields (the latest entry per property
+# wins, never summed across days) and nine DAILY COUNT fields (summed by date, same windows as every card).
+KS_DATE="fldGELiSwuaKhJ6iZ"; KS_PROP="fldfqoizUjIejptAI"
+KS_SNAP={"Total Vacancies":"fldXeY6GCQQnwiNAt","Units Turning Over":"fldTi5OEWy05YeRdu","Outstanding Collections":"fld4JIAzZPafQYJmc"}
+KS_COUNT={"New Leads":"fldLBJOvPFrsSDXhO","New Conversations":"fld58Ys1muJmVBW8q","New Showings":"fldA3O79pQPjdzqcd",
+          "New Applicants":"fldvdiGtIs5gJkOX7","New Leases":"fldrHf7Ztd1hEGsM4","Lease Renewals Signed":"fldI60aU5FBH1lcSk",
+          "Recertifications Completed":"fldJY6qrKAAlazXob","Notices Given":"fldarT93EoYOaxr0x","Evictions Posted":"fldLURZ49rsCDGDb4"}
+# Display order on the card. A property that has never filed still gets a row (shows "-"), so a silent
+# fourth property can never appear and a dead one can never vanish without being noticed.
+KS_PROPS=["The Willows","The Grove","The Bluffs"]
+# Total units per property (static; Derrick 2026-10-29: hard-code, the complexes do not add units). None = not yet
+# known, occupancy renders "-" for that property and for the total. Fill in from Randall and push.
+KS_UNITS={"The Willows":None,"The Grove":None,"The Bluffs":None}
 # Room display order = age progression, the way Paige reads her roster.
 FELC_ROOM_ORDER=["Pink Room","Lime Room","Orange Room","Green Room","Brown Room","Red Room","Blue Room","Yellow Room","Purple Room"]
 FELC_AFTERCARE="Purple Room"
@@ -168,7 +187,8 @@ FELC_AFTERCARE="Purple Room"
 # the hardcoded literals in build_payload_engine (no crash, no blank goals).
 REG_FILES={"kcm":"registry_kcm.json","ascend":"registry_ascend.json",
            "cowork":"registry_cowork.json","rentals":"registry_rentals.json",
-           "fundamentals":"registry_fundamentals.json","team":"registry_team.json"}
+           "fundamentals":"registry_fundamentals.json","team":"registry_team.json",
+           "keystone":"registry_keystone.json"}
 REG_KPI="fldJneEqHnbmlmMRb"; REG_GOAL="fldLPpv1oY10sn7gE"; REG_CAD="fldgChMlnK0rqOqZi"; REG_STATUS="fldwPGQRS265R8LgF"
 REG_OWNER=ACC.OWNER_FIELD   # Owner Name lookup — the registry is the source of truth for owners too (2026-10-15)
 CAD_MAP={"Daily":"day","Weekly":"week","Monthly":"mo","Overview":"overview"}
@@ -346,6 +366,55 @@ def rentals_M(pulls, as_of):
     recs=[{"cellValuesByFieldId":c} for c in kc]
     act={name:E.window_sum(recs, RK_DATE, fid, as_of) for name,fid in RK.items()}
     return {"rentals_ov":o,"rentals_act":act,"rentals_submits":ACC.submits_from(kc, RK_DATE, RK_WHO)}
+
+def keystone_M(pulls, as_of):
+    """Keystone of Mississippi (Rentals (MS)) — three apartment properties on one hand-filled daily form.
+    Snapshot fields take the LATEST entry per property (by Date, then by submission time, so a second
+    entry on the same day is a correction, not a double). Count fields are summed by date over the same
+    deduped rows, per property and across the division. No pull, no card: a missing keystone_kpi.json
+    leaves the division under 'coming' rather than rendering three empty properties."""
+    if not os.path.exists(os.path.join(pulls,"keystone_kpi.json")):
+        return {}
+    recs=_recs(_load(pulls,"keystone_kpi.json"))
+    rows=[]
+    for r in recs:
+        c=r.get("cellValuesByFieldId", r.get("fields", {}))
+        d=str(c.get(KS_DATE) or "")[:10]; p=_nm(c.get(KS_PROP))
+        if not d or not p: continue
+        rows.append((p, d, r.get("createdTime") or "", c))
+    # latest submission wins per (property, date)
+    latest={}
+    for p,d,t,c in rows:
+        k=(p,d)
+        if k not in latest or t>latest[k][0]:
+            latest[k]=(t,c)
+    byprop={}
+    for (p,d),(t,c) in latest.items():
+        byprop.setdefault(p,[]).append((d,c))
+    props=[]
+    for p in KS_PROPS+sorted(set(byprop)-set(KS_PROPS)):
+        entries=sorted(byprop.get(p,[]), key=lambda x:x[0])
+        recs_p=[{"cellValuesByFieldId":c} for d,c in entries]
+        snap={k:None for k in KS_SNAP}; snap_date=None
+        if entries:
+            snap_date,c=entries[-1]
+            snap={k:c.get(f) for k,f in KS_SNAP.items()}
+        units=KS_UNITS.get(p); vac=snap.get("Total Vacancies")
+        occ=(100.0*(units-vac)/units) if (units and vac is not None) else None
+        props.append({"name":p,"snap":snap,"snap_date":snap_date,"stale":bool(snap_date) and snap_date<as_of.isoformat(),
+                      "units":units,"occ":occ,
+                      "act":{k:E.window_sum(recs_p, KS_DATE, f, as_of) for k,f in KS_COUNT.items()},
+                      "dates":{d for d,c in entries}, "filed_yest":as_of.isoformat() in {d for d,c in entries}})
+    all_recs=[{"cellValuesByFieldId":c} for (p,d),(t,c) in latest.items()]
+    tot_act={k:E.window_sum(all_recs, KS_DATE, f, as_of) for k,f in KS_COUNT.items()}
+    tot_snap={k:(sum((pp["snap"][k] or 0) for pp in props) if any(pp["snap"][k] is not None for pp in props) else None) for k in KS_SNAP}
+    known=[pp for pp in props if pp["units"] and pp["snap"]["Total Vacancies"] is not None]
+    tot_units=sum(pp["units"] for pp in props if pp["units"]) if any(pp["units"] for pp in props) else None
+    tot_occ=(100.0*(sum(pp["units"] for pp in known)-sum(pp["snap"]["Total Vacancies"] for pp in known))/sum(pp["units"] for pp in known)
+             if known and len(known)==len(props) else None)
+    return {"ks_props":props,"ks_tot_act":tot_act,"ks_tot_snap":tot_snap,"ks_rows":len(rows),
+            "ks_tot_units":tot_units,"ks_tot_occ":tot_occ,
+            "ks_dupes":len(rows)-len(latest)}
 
 def _has_user(cell, users):
     s = (cell or "")
@@ -683,6 +752,7 @@ def build_M(pulls, as_of):
     M.update(ascend_M(pulls, as_of))
     M.update(cowork_M(pulls, as_of))
     M.update(rentals_M(pulls, as_of))
+    M.update(keystone_M(pulls, as_of))   # Rentals (MS); no-op when the pull is absent
     if as_of.isoformat() >= FUB_GO_LIVE_AS_OF or os.environ.get("FUB_FORCE") == "1":
         M.update(fub_M(pulls, as_of))
     # FELC_FORCE=1 in the environment renders the card regardless of the gate (review builds only).

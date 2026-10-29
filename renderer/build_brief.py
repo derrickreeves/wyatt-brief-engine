@@ -174,6 +174,9 @@ KS_COUNT={"New Leads":"fldLBJOvPFrsSDXhO","New Conversations":"fld58Ys1muJmVBW8q
 # Display order on the card. A property that has never filed still gets a row (shows "-"), so a silent
 # fourth property can never appear and a dead one can never vanish without being noticed.
 KS_PROPS=["The Willows","The Grove","The Bluffs"]
+# Total units per property (static; Derrick 2026-10-29: hard-code, the complexes do not add units). None = not yet
+# known, occupancy renders "-" for that property and for the total. Fill in from Randall and push.
+KS_UNITS={"The Willows":None,"The Grove":None,"The Bluffs":None}
 # Room display order = age progression, the way Paige reads her roster.
 FELC_ROOM_ORDER=["Pink Room","Lime Room","Orange Room","Green Room","Brown Room","Red Room","Blue Room","Yellow Room","Purple Room"]
 FELC_AFTERCARE="Purple Room"
@@ -396,13 +399,21 @@ def keystone_M(pulls, as_of):
         if entries:
             snap_date,c=entries[-1]
             snap={k:c.get(f) for k,f in KS_SNAP.items()}
+        units=KS_UNITS.get(p); vac=snap.get("Total Vacancies")
+        occ=(100.0*(units-vac)/units) if (units and vac is not None) else None
         props.append({"name":p,"snap":snap,"snap_date":snap_date,"stale":bool(snap_date) and snap_date<as_of.isoformat(),
+                      "units":units,"occ":occ,
                       "act":{k:E.window_sum(recs_p, KS_DATE, f, as_of) for k,f in KS_COUNT.items()},
                       "dates":{d for d,c in entries}, "filed_yest":as_of.isoformat() in {d for d,c in entries}})
     all_recs=[{"cellValuesByFieldId":c} for (p,d),(t,c) in latest.items()]
     tot_act={k:E.window_sum(all_recs, KS_DATE, f, as_of) for k,f in KS_COUNT.items()}
     tot_snap={k:(sum((pp["snap"][k] or 0) for pp in props) if any(pp["snap"][k] is not None for pp in props) else None) for k in KS_SNAP}
+    known=[pp for pp in props if pp["units"] and pp["snap"]["Total Vacancies"] is not None]
+    tot_units=sum(pp["units"] for pp in props if pp["units"]) if any(pp["units"] for pp in props) else None
+    tot_occ=(100.0*(sum(pp["units"] for pp in known)-sum(pp["snap"]["Total Vacancies"] for pp in known))/sum(pp["units"] for pp in known)
+             if known and len(known)==len(props) else None)
     return {"ks_props":props,"ks_tot_act":tot_act,"ks_tot_snap":tot_snap,"ks_rows":len(rows),
+            "ks_tot_units":tot_units,"ks_tot_occ":tot_occ,
             "ks_dupes":len(rows)-len(latest)}
 
 def _has_user(cell, users):

@@ -781,16 +781,20 @@ def _keystone(M, ao):
     blocks = [
         {"kind": "section", "title": "PORTFOLIO SNAPSHOT", "sub": snap_sub},
         {"kind": "cards", "items": [
-            ["Total Vacancies", n(ts["Total Vacancies"]), "across %d properties" % len(props), ""],
-            ["Units Turning Over", n(ts["Units Turning Over"]), "", ""],
+            ["Total Occupancy", ("%s%%" % _pct(M.get("ks_tot_occ"))) if M.get("ks_tot_occ") is not None else "-", "goal 96%", "amber"],
+            ["Units", n(M.get("ks_tot_units")), ("%s vacant" % n(ts["Total Vacancies"])) if ts["Total Vacancies"] is not None else "", ""],
             ["Outstanding Collections", m(ts["Outstanding Collections"]), "as reported", "amber"],
             ["New Leases MTD", str(tot["New Leases"]["MTD"]), "", ""]]},
-        {"kind": "section", "title": "PROPERTY SNAPSHOT", "sub": "each property's most recent entry"},
-        {"kind": "table", "cols": ["Property", "Vacant", "Turning Over", "Outstanding", "As of"],
-         "widths": [200, 70, 84, 90, 60], "left_cols": 1,
-         "rows": [[p["name"], n(p["snap"]["Total Vacancies"]), n(p["snap"]["Units Turning Over"]),
-                   m(p["snap"]["Outstanding Collections"]), (md(p["snap_date"]) if not p["stale"] else A(md(p["snap_date"]), "amber"))] for p in props],
-         "note": "Unit counts are not reported yet, so no occupancy rate until the Knock CRM feed lands."},
+        {"kind": "section", "title": "PROPERTY OCCUPANCY", "sub": "per-property split from each property's most recent entry"},
+        {"kind": "table", "cols": ["Property", "Units", "Vacant", "Occupancy"],
+         "widths": [246, 78, 78, 102], "left_cols": 1,
+         "rows": [[p["name"], n(p["units"]), n(p["snap"]["Total Vacancies"]), ("%s%%" % _pct(p["occ"])) if p["occ"] is not None else "-"] for p in props],
+         "note": ("Unit counts pending from Randall; occupancy shows once they are in." if any(p["units"] is None for p in props) else None)},
+        {"kind": "section", "title": "TURNOVER AND COLLECTIONS", "sub": "current totals as entered on the form, with the entry date"},
+        {"kind": "table", "cols": ["Property", "Turning Over", "Outstanding Collections", "As of"],
+         "widths": [246, 78, 110, 70], "left_cols": 1,
+         "rows": [[p["name"], n(p["snap"]["Units Turning Over"]), m(p["snap"]["Outstanding Collections"]),
+                   (md(p["snap_date"]) if not p["stale"] else A(md(p["snap_date"]), "amber"))] for p in props]},
         {"kind": "section", "title": "LEASING ACTIVITY - ALL PROPERTIES", "sub": "reporters: %s · summed across the three properties · Status = on/off the goal's pace" % ACC.names(owners)},
         {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
          "widths": [120, 100, 46, 42, 42, 42, 52, 60], "left_cols": 2, "rows": [arow(lb, tot[lb]) for lb in count_labels]},
@@ -805,12 +809,13 @@ def _keystone(M, ao):
     tally_txt = " · ".join("%s %d/%d%s" % (t["name"], t["filed"], t["n"], ("" if t["on_form"] else " (never filed)")) for t in rep["tally"])
     blocks.append({"kind": "report", "what": "Keystone daily form (one entry per property)", "missed": rep["missed_yest"],
                    "weekend": rep["weekend"], "tally": tally_txt, "window": rep["window"]})
-    vac = ts["Total Vacancies"]
+    vac = ts["Total Vacancies"]; to = M.get("ks_tot_occ")
+    occ_txt = ("Occupancy is %s%% across %s units." % (_pct(to), n(M.get("ks_tot_units")))) if to is not None else ("%s units vacant across %d properties (unit counts pending, so no occupancy rate yet)." % (n(vac), len(props)))
     return {"title": "Rentals (MS) · Keystone of Mississippi", "attention": attention,
             "foot": "Sources: Keystone daily form (The Willows, The Grove, The Bluffs) until Knock CRM / OneSite feed the same fields · owners from Scorecard Mapping",
-            "health": ("%s units vacant and %s turning over across %d properties, %s in outstanding collections as reported. "
+            "health": ("%s %s turning over, %s in outstanding collections as reported. "
                        "Numbers are hand-entered daily; a property with no entry yesterday is named below."
-                       % (n(vac), n(ts["Units Turning Over"]), len(props), m(ts["Outstanding Collections"]))),
+                       % (occ_txt, n(ts["Units Turning Over"]), m(ts["Outstanding Collections"]))),
             "blocks": blocks}
 
 # ---------------- Kaizen Home Sales & Services — brokerage + Kaizen Team, from Follow Up Boss ----------------

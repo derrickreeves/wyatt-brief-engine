@@ -211,14 +211,14 @@ def _cover(M):
     oa = M.get("office_act"); op = M.get("office_pipe") or {}
     team_line = [["Kaizen Home Sales & Services", "%d active agents · %d closings MTD · %d under contract · Kaizen Team detail inside" % (
         M.get("office_active_agents", 0), oa["Closings"]["MTD"], op.get("Under Contract", {}).get("n", 0))]] if M.get("fub_loaded") else []
-    ks = M.get("ks_props")
+    msp = M.get("ks_props")
     ks_line = []
-    if ks:
+    if msp:
         kt = M["ks_tot_snap"]
         ks_line = [["Rentals (MS) · Keystone of Mississippi", "%s vacant across %d properties · %s outstanding collections · %d new leases MTD" % (
-            "-" if kt["Total Vacancies"] is None else num(kt["Total Vacancies"]), len(ks),
+            "-" if kt["Total Vacancies"] is None else num(kt["Total Vacancies"]), len(msp),
             money(kt["Outstanding Collections"]) if kt["Outstanding Collections"] is not None else "-", M["ks_tot_act"]["New Leases"]["MTD"])]]
-    coming = ([] if ks else ["Rentals (MS)"]) + ([] if fo else ["Fundamentals of Early Learning Center"]) + ([] if M.get("fub_loaded") else ["Kaizen Home Sales & Services"]) + ["Shared Events", "IMG", "Gobundance"]
+    coming = ([] if msp else ["Rentals (MS)"]) + ([] if fo else ["Fundamentals of Early Learning Center"]) + ([] if M.get("fub_loaded") else ["Kaizen Home Sales & Services"]) + ["Shared Events", "IMG", "Gobundance"]
     return {
         "title": "Wyatt Portfolio Daily Brief",
         "health": ("KCM has %d homes under construction (%d of them already listed) and %d active listings, with deal detail below. "
@@ -801,7 +801,10 @@ def _keystone(M, ao):
             {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
              "widths": [120, 100, 46, 42, 42, 42, 52, 60], "left_cols": 2, "rows": [arow(lb, p["act"][lb]) for lb in count_labels]},
         ]
-    blocks.append(_report_block("Keystone daily form (one entry per property)", rep))
+    # Report line with FULL property names (the shared helper shortens to first names, which here would read "The").
+    tally_txt = " · ".join("%s %d/%d%s" % (t["name"], t["filed"], t["n"], ("" if t["on_form"] else " (never filed)")) for t in rep["tally"])
+    blocks.append({"kind": "report", "what": "Keystone daily form (one entry per property)", "missed": rep["missed_yest"],
+                   "weekend": rep["weekend"], "tally": tally_txt, "window": rep["window"]})
     vac = ts["Total Vacancies"]
     return {"title": "Rentals (MS) · Keystone of Mississippi", "attention": attention,
             "foot": "Sources: Keystone daily form (The Willows, The Grove, The Bluffs) until Knock CRM / OneSite feed the same fields · owners from Scorecard Mapping",

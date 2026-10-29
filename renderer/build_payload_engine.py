@@ -49,6 +49,7 @@ _ALIAS = {
         "Day Passes": "Day Pass",
     },
     "rentals": {},
+    "keystone": {},
     "fundamentals": {
         "Churn (withdrawals)": "Churned",
         "Terminations": "Terminated Employees",
@@ -183,6 +184,7 @@ def build(M, as_of):
         # Fundamentals joins after Rentals in the locked order, gated by FELC_GO_LIVE_AS_OF in
         # build_brief (first five-card send targeted Fri 2026-09-04, as_of 9/03).
         "divisions": [_kcm(M, as_of), _ascend(M, as_of), _coworking(M, as_of), _rentals(M, as_of)]
+                     + ([_keystone(M, as_of)] if "ks_props" in M else [])   # Rentals (MS), 2026-10-29
                      + ([_fundamentals(M, as_of)] if "felc_ov" in M else [])
                      + ([_team(M, as_of)] if M.get("fub_loaded") else []),
     }
@@ -209,7 +211,14 @@ def _cover(M):
     oa = M.get("office_act"); op = M.get("office_pipe") or {}
     team_line = [["Kaizen Home Sales & Services", "%d active agents · %d closings MTD · %d under contract · Kaizen Team detail inside" % (
         M.get("office_active_agents", 0), oa["Closings"]["MTD"], op.get("Under Contract", {}).get("n", 0))]] if M.get("fub_loaded") else []
-    coming = ([] if fo else ["Fundamentals of Early Learning Center"]) + ([] if M.get("fub_loaded") else ["Kaizen Home Sales & Services"]) + ["Shared Events", "IMG", "Gobundance"]
+    ks = M.get("ks_props")
+    ks_line = []
+    if ks:
+        kt = M["ks_tot_snap"]
+        ks_line = [["Rentals (MS) · Keystone of Mississippi", "%s vacant across %d properties · %s outstanding collections · %d new leases MTD" % (
+            "-" if kt["Total Vacancies"] is None else num(kt["Total Vacancies"]), len(ks),
+            money(kt["Outstanding Collections"]) if kt["Outstanding Collections"] is not None else "-", M["ks_tot_act"]["New Leases"]["MTD"])]]
+    coming = ([] if ks else ["Rentals (MS)"]) + ([] if fo else ["Fundamentals of Early Learning Center"]) + ([] if M.get("fub_loaded") else ["Kaizen Home Sales & Services"]) + ["Shared Events", "IMG", "Gobundance"]
     return {
         "title": "Wyatt Portfolio Daily Brief",
         "health": ("KCM has %d homes under construction (%d of them already listed) and %d active listings, with deal detail below. "
@@ -224,7 +233,7 @@ def _cover(M):
             ["Ascend Mastermind Community", "%d paying members, %s MRR · paid leads accelerating" % (ar["members"], money(ar["mrr"]))],
             ["Kaizen Coworking & Event Space", "%d members, %s MRR" % (cr["members"]+cr["unpaid"], money(cr["mrr"]))],
             ["Rentals", "%s%% occupancy across %d units" % (_pct(ro["occ"]), ro["units"] or 0)],
-        ] + felc_line + team_line,
+        ] + ks_line + felc_line + team_line,
         "coming": coming,
         "note": "",
     }
@@ -732,6 +741,73 @@ def _rentals(M, ao):
             "foot": foot + " · owners from Scorecard Mapping",
             "health": ("Occupancy is %s%% across %d units. Leasing activity pace is shown per KPI below."
                        % (_pct(o["occ"]), o["units"] or 0)),
+            "blocks": blocks}
+
+# ---------------- Rentals (MS) — Keystone of Mississippi, hand-filled daily form (bridge until Knock/OneSite) ----------------
+# Added 2026-10-29. Grouped by property the way the Louisiana card is. Snapshot = latest entry per property;
+# counts = summed by date. Goals and owners come from the Rentals (MS) rows in Scorecard Mapping (none set yet,
+# so every goal prints "-" and no pace status). Deliberately minimal: no occupancy rate (no unit counts exist),
+# no turnover-vs-vacancy definition — both wait for the Knock feed.
+_KS_FORM = "Fill out the Keystone daily KPI form in Airtable"
+def _keystone(M, ao):
+    props = M["ks_props"]; tot = M["ks_tot_act"]; ts = M["ks_tot_snap"]
+    count_labels = ["New Leads", "New Conversations", "New Showings", "New Applicants", "New Leases",
+                    "Lease Renewals Signed", "Recertifications Completed", "Notices Given", "Evictions Posted"]
+    down = {"Notices Given", "Evictions Posted"}
+    def arow(label, w):
+        g, cad, _ = _rg(M, "keystone", label, None, "day")
+        direction = "down" if label in down else "up"
+        status = st(w["MTD"], g, cad, ao, direction) if g not in (None, "") else A("--", "light")
+        return [label, _own(M, "keystone", label, "-"), _goaltxt(g, cad),
+                str(w["Yest"]), str(w["WTD"]), str(w["MTD"]), str(w["LastMo"]), status]
+    def n(v): return "-" if v is None else num(v)
+    def m(v): return "-" if v is None else money(v)
+    def md(d): return ACC._md(d) if d else "never"
+    owners = _expected(M, "keystone", count_labels + list(ts.keys()), ["Tracie Moore", "Jasmine Sanders"])
+    # Reporting by PROPERTY (the form key), not by person: the registry owns every KPI jointly, so a missed
+    # property is asked of every owner until Randall splits the properties between them.
+    missed = [p["name"] for p in props if not p["filed_yest"]]
+    weekend = ao.weekday() >= 5
+    days = ACC.biz_days_back(ao, 5); dayset = {d.isoformat() for d in days}
+    tally = [dict(name=p["name"], filed=len(p["dates"] & dayset), n=5, last=(max(p["dates"]) if p["dates"] else None), on_form=bool(p["dates"])) for p in props]
+    rep = dict(expected=[p["name"] for p in props], tally=tally, missed_yest=([] if weekend else missed), weekend=weekend, extra=[],
+               window="%s-%s" % (ACC._md(days[-1].isoformat()), ACC._md(days[0].isoformat())))
+    attention = []
+    if missed and not weekend:
+        for o in owners:
+            attention.append(_att(o, _KS_FORM, "no entry for %s on %s" % (", ".join(missed), ACC._md(ao.isoformat()))))
+    stale = [p for p in props if p["stale"]]
+    snap_sub = "hand-filled daily form, latest entry per property" + ((" · stale: %s" % ", ".join("%s (%s)" % (p["name"], md(p["snap_date"])) for p in stale)) if stale else "")
+    blocks = [
+        {"kind": "section", "title": "PORTFOLIO SNAPSHOT", "sub": snap_sub},
+        {"kind": "cards", "items": [
+            ["Total Vacancies", n(ts["Total Vacancies"]), "across %d properties" % len(props), ""],
+            ["Units Turning Over", n(ts["Units Turning Over"]), "", ""],
+            ["Outstanding Collections", m(ts["Outstanding Collections"]), "as reported", "amber"],
+            ["New Leases MTD", str(tot["New Leases"]["MTD"]), "", ""]]},
+        {"kind": "section", "title": "PROPERTY SNAPSHOT", "sub": "each property's most recent entry"},
+        {"kind": "table", "cols": ["Property", "Vacant", "Turning Over", "Outstanding", "As of"],
+         "widths": [200, 70, 84, 90, 60], "left_cols": 1,
+         "rows": [[p["name"], n(p["snap"]["Total Vacancies"]), n(p["snap"]["Units Turning Over"]),
+                   m(p["snap"]["Outstanding Collections"]), (md(p["snap_date"]) if not p["stale"] else A(md(p["snap_date"]), "amber"))] for p in props],
+         "note": "Unit counts are not reported yet, so no occupancy rate until the Knock CRM feed lands."},
+        {"kind": "section", "title": "LEASING ACTIVITY - ALL PROPERTIES", "sub": "reporters: %s · summed across the three properties · Status = on/off the goal's pace" % ACC.names(owners)},
+        {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
+         "widths": [120, 100, 46, 42, 42, 42, 52, 60], "left_cols": 2, "rows": [arow(lb, tot[lb]) for lb in count_labels]},
+    ]
+    for p in props:
+        blocks += [
+            {"kind": "section", "title": p["name"].upper(), "sub": "daily form entries for this property only" + ((" · last entry %s" % md(p["snap_date"])) if p["stale"] or not p["snap_date"] else "")},
+            {"kind": "table", "cols": ["KPI", "Owner", "Goal", "Yest", "WTD", "MTD", "LastMo", "Status"],
+             "widths": [120, 100, 46, 42, 42, 42, 52, 60], "left_cols": 2, "rows": [arow(lb, p["act"][lb]) for lb in count_labels]},
+        ]
+    blocks.append(_report_block("Keystone daily form (one entry per property)", rep))
+    vac = ts["Total Vacancies"]
+    return {"title": "Rentals (MS) · Keystone of Mississippi", "attention": attention,
+            "foot": "Sources: Keystone daily form (The Willows, The Grove, The Bluffs) until Knock CRM / OneSite feed the same fields · owners from Scorecard Mapping",
+            "health": ("%s units vacant and %s turning over across %d properties, %s in outstanding collections as reported. "
+                       "Numbers are hand-entered daily; a property with no entry yesterday is named below."
+                       % (n(vac), n(ts["Units Turning Over"]), len(props), m(ts["Outstanding Collections"]))),
             "blocks": blocks}
 
 # ---------------- Kaizen Home Sales & Services — brokerage + Kaizen Team, from Follow Up Boss ----------------
